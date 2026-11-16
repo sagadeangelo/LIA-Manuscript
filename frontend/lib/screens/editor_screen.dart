@@ -610,6 +610,24 @@ class _EditorScreenState extends State<EditorScreen> {
     await record.writeAsString(path, flush: true);
   }
 
+  Future<void> linkOriginalDocx() async {
+    final mid = manuscriptId;
+    if (mid == null) {
+      return;
+    }
+    await task(() async {
+      const word = XTypeGroup(label: 'Word DOCX', extensions: ['docx']);
+      final template = await openFile(acceptedTypeGroups: [word]);
+      if (template == null || !mounted) {
+        return;
+      }
+      await api.linkDocxTemplate(widget.projectId, mid, template.path);
+      if (mounted) {
+        setState(() => status = 'DOCX original vinculado. Ya puedes exportar.');
+      }
+    });
+  }
+
   Future<void> exportSavedDocx() async {
     final mid = manuscriptId;
     final vid = loadedVersionId;
@@ -623,6 +641,22 @@ class _EditorScreenState extends State<EditorScreen> {
         RegExp(r'\.(docx|txt)$', caseSensitive: false), '',
       );
       final stamp = DateTime.now().toIso8601String().replaceAll(':', '-');
+      var bytes = await api.exportDocx(widget.projectId, mid, vid);
+      if (bytes == null) {
+        final record = docxTemplateRecord(mid);
+        if (await record.exists()) {
+          final remembered = await record.readAsString();
+          if (remembered.isNotEmpty && await dictionary_io.File(remembered).exists()) {
+            bytes = await api.exportDocx(widget.projectId, mid, vid, remembered);
+          }
+        }
+      }
+      if (bytes == null) {
+        throw StateError('Usa Vincular DOCX original una vez y vuelve a exportar.');
+      }
+      if (!mounted) {
+        return;
+      }
       final location = await getSaveLocation(
         acceptedTypeGroups: [word],
         suggestedName: '${originalName}_EN-US_${vid.split('-').first}_$stamp.docx',
@@ -631,28 +665,6 @@ class _EditorScreenState extends State<EditorScreen> {
         return;
       }
 
-      var bytes = await api.exportDocx(widget.projectId, mid, vid);
-      if (bytes == null) {
-        final record = docxTemplateRecord(mid);
-        var templatePath = await record.exists() ? await record.readAsString() : '';
-        if (templatePath.isEmpty || !await dictionary_io.File(templatePath).exists()) {
-          if (!mounted) {
-            return;
-          }
-          final template = await openFile(acceptedTypeGroups: [word]);
-          if (template == null || !mounted) {
-            return;
-          }
-          templatePath = template.path;
-        }
-        bytes = await api.exportDocx(widget.projectId, mid, vid, templatePath);
-      }
-      if (bytes == null) {
-        throw StateError('Falta el DOCX original.');
-      }
-      if (!mounted) {
-        return;
-      }
       final target = location.path.toLowerCase().endsWith('.docx')
           ? location.path
           : '${location.path}.docx';
@@ -1338,6 +1350,11 @@ class _EditorScreenState extends State<EditorScreen> {
             label: const Text('REVISAR INGL\u00C9S EN-US'),
           ),
 
+          OutlinedButton.icon(
+            onPressed: busy || manuscriptId == null ? null : linkOriginalDocx,
+            icon: const Icon(Icons.link),
+            label: const Text('VINCULAR DOCX ORIGINAL'),
+          ),
           OutlinedButton.icon(
             onPressed: busy || loadedVersionId == null ? null : exportSavedDocx,
             icon: const Icon(Icons.file_download_outlined),

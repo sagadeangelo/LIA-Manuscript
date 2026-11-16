@@ -922,8 +922,11 @@ class _EditorScreenState extends State<EditorScreen> {
           setState(() {
             bookChapterNumber = null;
             bookChapterTitle = null;
-            status = 'Libro: $saved de ${titles.length} cap\u00EDtulos guardados.'
-                '${failures.isEmpty ? '' : '\nPendientes:\n${failures.join('\n')}'}';
+            final summary = 'Libro: $saved de ${titles.length} capítulos guardados.';
+            status = failures.isEmpty
+                ? summary
+                : '$summary\nPendientes:\n${failures.join('
+')}';
           });
         }
       }

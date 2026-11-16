@@ -167,6 +167,30 @@ def translate_one_chapter(project_id: str, manuscript_id: str, payload: ChapterR
 from .manuscripts import ensure_docx_storage
 
 
+@router.put("/manuscripts/{manuscript_id}/docx-template")
+def link_docx_template(project_id: str, manuscript_id: str, file: UploadFile = File(...)):
+    expected = manuscript_text(project_id, manuscript_id)
+    limit = 15 * 1024 * 1024
+    raw = file.file.read(limit + 1)
+    if len(raw) > limit:
+        raise HTTPException(status_code=413, detail="El DOCX supera 15 MB.")
+    try:
+        document = Document(BytesIO(raw))
+        if document.part.partname != "/word/document.xml":
+            raise ValueError("Estructura DOCX no compatible")
+    except (BadZipFile, PackageNotFoundError, KeyError, ValueError, etree.XMLSyntaxError) as exc:
+        raise HTTPException(status_code=422, detail="No se pudo abrir el DOCX original.") from exc
+    if "\n".join(p.text for p in document.paragraphs) != expected:
+        raise HTTPException(status_code=422, detail="El DOCX no coincide con el manuscrito importado.")
+    with connect() as db:
+        ensure_docx_storage(db)
+        db.execute(
+            "INSERT OR IGNORE INTO manuscript_docx (manuscript_id, content) VALUES (?, ?)",
+            (manuscript_id, raw),
+        )
+    return {"linked": True}
+
+
 @router.post("/manuscripts/{manuscript_id}/versions/{version_id}/export-docx")
 def export_preface_docx(
     project_id: str, manuscript_id: str, version_id: str, file: UploadFile | None = File(None)

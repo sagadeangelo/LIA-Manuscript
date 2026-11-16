@@ -131,6 +131,52 @@ class ApiService {
     }
   }
 
+  Future<void> linkDocxTemplate(
+    String pid,
+    String mid,
+    String originalPath,
+  ) async {
+    final file = File(originalPath);
+    final length = await file.length();
+    if (length > 15 * 1024 * 1024) {
+      throw StateError('El DOCX supera 15 MB.');
+    }
+    final boundary = 'liaDocx${DateTime.now().microsecondsSinceEpoch}';
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    const limit = Duration(minutes: 2);
+    try {
+      final req = await client
+          .openUrl(
+            'PUT',
+            Uri.parse(
+              '$baseUrl/api/projects/$pid/manuscripts/$mid/docx-template',
+            ),
+          )
+          .timeout(limit);
+        req.headers.set(
+          HttpHeaders.contentTypeHeader,
+          'multipart/form-data; boundary=$boundary',
+        );
+        req.write(
+          '--$boundary\r\n'
+          'Content-Disposition: form-data; name="file"; filename="original.docx"\r\n'
+          'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n',
+        );
+        await req.addStream(file.openRead()).timeout(limit);
+        req.write('\r\n--$boundary--\r\n');
+      final res = await req.close().timeout(limit);
+      if (res.statusCode != 200) {
+        final detail = jsonDecode(
+          await utf8.decoder.bind(res).join().timeout(limit),
+        );
+        throw StateError('${detail['detail']}');
+      }
+      await res.drain<void>().timeout(limit);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<bool> isOnline() async {
     try {
       await request('GET', '/health', timeout: const Duration(seconds: 4));

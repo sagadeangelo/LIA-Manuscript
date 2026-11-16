@@ -871,11 +871,66 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  int? bookChapterNumber;
+  int bookChapterTotal = 0;
+  String? bookChapterTitle;
+
   Future<void> translateChapter() async {
     final mid = manuscriptId;
-    if (mid == null) return;
+    final model = selectedModel;
+    if (mid == null || model == null) {
+      return;
+    }
+    await task(() => translateOneChapter(mid, chapterIndex, model));
+  }
+
+  Future<void> translateAllChapters() async {
+    final mid = manuscriptId;
+    final model = selectedModel;
+    if (mid == null || model == null || chapters.isEmpty) {
+      return;
+    }
+    final titles = [
+      for (final chapter in chapters) '${chapter['title']}',
+    ];
     await task(() async {
-      final index = chapterIndex;
+      final failures = <String>[];
+      var saved = 0;
+      try {
+        for (var i = 0; i < titles.length; i++) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            bookChapterNumber = i + 1;
+            bookChapterTotal = titles.length;
+            bookChapterTitle = titles[i];
+          });
+          try {
+            await selectChapter(i);
+            if (!mounted) {
+              return;
+            }
+            await translateOneChapter(mid, i, model);
+            saved++;
+          } catch (error) {
+            failures.add('${titles[i]}: $error');
+          }
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            bookChapterNumber = null;
+            bookChapterTitle = null;
+            status = 'Libro: $saved de ${titles.length} cap\u00EDtulos guardados.'
+                '${failures.isEmpty ? '' : '\nPendientes:\n${failures.join('\n')}'}';
+          });
+        }
+      }
+    });
+  }
+
+  Future<void> translateOneChapter(String mid, int index, String activeModel) async {
       final random = Random.secure();
       final digits = List.generate(
         32,
@@ -884,11 +939,7 @@ class _EditorScreenState extends State<EditorScreen> {
       final jobId =
           '${digits.substring(0, 8)}-${digits.substring(8, 12)}-'
           '${digits.substring(12, 16)}-${digits.substring(16, 20)}-${digits.substring(20)}';
-      final activeModel = selectedModel;
-      if (activeModel == null) {
-        return;
-      }
-      final stopwatch = Stopwatch()..start();
+       final stopwatch = Stopwatch()..start();
       setState(() {
         completedSegments = 0;
         totalSegments = 0;
@@ -955,7 +1006,6 @@ class _EditorScreenState extends State<EditorScreen> {
         timer.cancel();
         if (mounted) setState(() => translating = false);
       }
-    });
   }
 
   Future<void> addGlossary() async {
@@ -1190,6 +1240,16 @@ class _EditorScreenState extends State<EditorScreen> {
             icon: const Icon(Icons.auto_awesome),
             label: Text(translating ? 'TRADUCIENDO…' : 'TRADUCIR CAPÍTULO'),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: busy || manuscriptId == null || chapters.isEmpty ||
+                    selectedModel == null || loadingModels || modelsError != null
+                ? null : translateAllChapters,
+            icon: const Icon(Icons.library_books_outlined),
+            label: const Text('TRADUCIR TODOS LOS CAPÍTULOS'),
+          ),
+          if (bookChapterNumber != null)
+            Text('Libro: $bookChapterNumber de $bookChapterTotal · $bookChapterTitle'),
           if (translating || translationPercent == 100) ...[
             const SizedBox(height: 14),
             LinearProgressIndicator(

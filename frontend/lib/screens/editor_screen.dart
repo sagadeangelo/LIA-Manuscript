@@ -145,6 +145,9 @@ class _EditorScreenState extends State<EditorScreen> {
     await task(() async {
       setState(() => status = 'Importando ${selected.name}...');
       final uploaded = await api.upload(widget.projectId, selected.path);
+      if (selected.name.toLowerCase().endsWith('.docx')) {
+        await rememberDocxTemplate('${uploaded['id']}', selected.path);
+      }
       final found = await api.manuscripts(widget.projectId);
       if (!mounted) return;
       setState(() => manuscripts = found);
@@ -592,6 +595,21 @@ class _EditorScreenState extends State<EditorScreen> {
     });
   }
 
+  dictionary_io.File docxTemplateRecord(String manuscript) {
+    if (!RegExp(r'^[a-zA-Z0-9_-]+$').hasMatch(manuscript)) {
+      throw StateError('Identificador de manuscrito inválido.');
+    }
+    final parent = englishDictionaryFile().parent;
+    final separator = dictionary_io.Platform.pathSeparator;
+    return dictionary_io.File('${parent.path}${separator}docx-templates$separator$manuscript.txt');
+  }
+
+  Future<void> rememberDocxTemplate(String manuscript, String path) async {
+    final record = docxTemplateRecord(manuscript);
+    await record.parent.create(recursive: true);
+    await record.writeAsString(path, flush: true);
+  }
+
   Future<void> exportSavedDocx() async {
     final mid = manuscriptId;
     final vid = loadedVersionId;
@@ -600,21 +618,9 @@ class _EditorScreenState extends State<EditorScreen> {
     }
     await task(() async {
       const word = XTypeGroup(label: 'Word DOCX', extensions: ['docx']);
-      final template = await openFile(acceptedTypeGroups: [word]);
-      if (template == null || !mounted) {
-        return;
-      }
-      final bytes = await api.exportDocx(
-        widget.projectId,
-        mid,
-        vid,
-        template.path,
-      );
-      if (!mounted) {
-        return;
-      }
-      final originalName = template.name.replaceFirst(
-        RegExp(r'\.docx$', caseSensitive: false), '',
+      final manuscript = manuscripts.firstWhere((item) => item['id'] == mid);
+      final originalName = '${manuscript['filename']}'.replaceFirst(
+        RegExp(r'\.(docx|txt)$', caseSensitive: false), '',
       );
       final stamp = DateTime.now().toIso8601String().replaceAll(':', '-');
       final location = await getSaveLocation(
@@ -622,6 +628,25 @@ class _EditorScreenState extends State<EditorScreen> {
         suggestedName: '${originalName}_EN-US_${vid.split('-').first}_$stamp.docx',
       );
       if (location == null || !mounted) {
+        return;
+      }
+
+      final record = docxTemplateRecord(mid);
+      var templatePath = await record.exists()
+          ? await record.readAsString() : '';
+      if (templatePath.isEmpty || !await dictionary_io.File(templatePath).exists()) {
+        if (!mounted) {
+          return;
+        }
+        final template = await openFile(acceptedTypeGroups: [word]);
+        if (template == null || !mounted) {
+          return;
+        }
+        templatePath = template.path;
+      }
+      final bytes = await api.exportDocx(widget.projectId, mid, vid, templatePath);
+      await rememberDocxTemplate(mid, templatePath);
+      if (!mounted) {
         return;
       }
       final target = location.path.toLowerCase().endsWith('.docx')

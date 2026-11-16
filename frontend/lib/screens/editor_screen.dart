@@ -259,6 +259,17 @@ class _EditorScreenState extends State<EditorScreen> {
     return content.cast<String>().toSet();
   }
 
+  String englishDictionaryKey(String word) {
+    return word.trim().toLowerCase()
+        .replaceAll('n\u0303', 'ñ')
+        .replaceAll(RegExp(r'[áàâäãå]'), 'a')
+        .replaceAll(RegExp(r'[éèêë]'), 'e')
+        .replaceAll(RegExp(r'[íìîï]'), 'i')
+        .replaceAll(RegExp(r'[óòôöõ]'), 'o')
+        .replaceAll(RegExp(r'[úùûü]'), 'u')
+        .replaceAll(RegExp(r'[\u0300\u0301\u0302\u0303\u0308\u030A]'), '');
+  }
+
   bool isEnglishSpellingWarning(Map<String, dynamic> match) {
     final rule = match['rule'];
     if (rule is! Map) {
@@ -286,6 +297,7 @@ class _EditorScreenState extends State<EditorScreen> {
       var draft = original;
       final dictionaryFile = englishDictionaryFile();
       final dictionary = readEnglishDictionary(dictionaryFile);
+      final dictionaryKeys = dictionary.map(englishDictionaryKey).toSet();
 
       List<Map<String, dynamic>> visibleMatches(
         String text, List<Map<String, dynamic>> found,
@@ -298,7 +310,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   length > 0 &&
                   start + length <= text.length &&
                   isEnglishSpellingWarning(match) &&
-                  dictionary.contains(text.substring(start, start + length))) {
+                  dictionaryKeys.contains(englishDictionaryKey(text.substring(start, start + length)))) {
                 return false;
               }
               return start is int &&
@@ -329,6 +341,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   dictionary_json.jsonEncode(updated), flush: true,
                 );
                 dictionary.add(word);
+                dictionaryKeys.add(englishDictionaryKey(word));
               }
 
               Future<void> applyReplacement(

@@ -1,0 +1,34 @@
+from contextlib import contextmanager
+import sqlite3
+from pathlib import Path
+from .config import settings
+
+
+@contextmanager
+def connect():
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(settings.data_dir / "lia_manuscript.sqlite3")
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA foreign_keys=ON")
+        with db:
+            yield db
+    finally:
+        db.close()
+
+
+def initialize():
+    with connect() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS manuscripts (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )""")

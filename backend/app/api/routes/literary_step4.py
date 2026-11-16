@@ -164,16 +164,30 @@ def translate_one_chapter(project_id: str, manuscript_id: str, payload: ChapterR
             "warnings": translated["warnings"], "chapter_index": payload.chapter_index}
 
 
+from .manuscripts import ensure_docx_storage
+
+
 @router.post("/manuscripts/{manuscript_id}/versions/{version_id}/export-docx")
 def export_preface_docx(
-    project_id: str, manuscript_id: str, version_id: str, file: UploadFile = File(...)
+    project_id: str, manuscript_id: str, version_id: str, file: UploadFile | None = File(None)
 ):
     version = version_detail(project_id, manuscript_id, version_id)
     if version["chapter_index"] != 0 or version["chapter_title"] != "Prefacio / inicio":
         raise HTTPException(status_code=422, detail="Esta exportacion admite Prefacio / inicio.")
 
     limit = 15 * 1024 * 1024
-    raw = file.file.read(limit + 1)
+    with connect() as db:
+        ensure_docx_storage(db)
+        stored = db.execute(
+            "SELECT content FROM manuscript_docx WHERE manuscript_id = ?",
+            (manuscript_id,),
+        ).fetchone()
+    if stored is not None:
+        raw = stored["content"]
+    elif file is not None:
+        raw = file.file.read(limit + 1)
+    else:
+        raise HTTPException(status_code=409, detail="DOCX_TEMPLATE_REQUIRED")
     if len(raw) > limit:
         raise HTTPException(status_code=413, detail="El DOCX supera 15 MB.")
     try:
@@ -186,6 +200,8 @@ def export_preface_docx(
     paragraphs = document.paragraphs
     source = version["source_text"]
     full_text = "\n".join(p.text for p in paragraphs)
+    if stored is None and full_text != manuscript_text(project_id, manuscript_id):
+        raise HTTPException(status_code=422, detail="Selecciona el DOCX original del manuscrito importado.")
     if not source or not full_text.startswith(source):
         raise HTTPException(status_code=422, detail="Este DOCX no coincide con el prefacio original.")
     if len(source) < len(full_text) and not (
@@ -247,6 +263,13 @@ def export_preface_docx(
         for member in template.infolist():
             data = xml if member.filename == "word/document.xml" else template.read(member)
             result.writestr(member, data)
+    if stored is None:
+        with connect() as db:
+            ensure_docx_storage(db)
+            db.execute(
+                "INSERT OR IGNORE INTO manuscript_docx (manuscript_id, content) VALUES (?, ?)",
+                (manuscript_id, raw),
+            )
     return Response(
         output.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

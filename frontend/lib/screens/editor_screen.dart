@@ -322,7 +322,18 @@ class _EditorScreenState extends State<EditorScreen> {
             builder: (context, refresh) {
               final matches = visibleMatches(draft, found);
 
-              Future<void> applyReplacement(String updated) async {
+              void saveDictionaryWord(String word) {
+                final updated = {...dictionary, word}.toList()..sort();
+                dictionaryFile.parent.createSync(recursive: true);
+                dictionaryFile.writeAsStringSync(
+                  dictionary_json.jsonEncode(updated), flush: true,
+                );
+                dictionary.add(word);
+              }
+
+              Future<void> applyReplacement(
+                String updated, {String? dictionaryWord}
+              ) async {
                 if (updating || updated == draft) {
                   return;
                 }
@@ -334,6 +345,9 @@ class _EditorScreenState extends State<EditorScreen> {
                   final checked = await api.checkAmericanEnglish(updated);
                   if (!dialogContext.mounted) {
                     return;
+                  }
+                  if (dictionaryWord != null) {
+                    saveDictionaryWord(dictionaryWord);
                   }
                   refresh(() {
                     draft = updated;
@@ -352,15 +366,8 @@ class _EditorScreenState extends State<EditorScreen> {
 
               void addToDictionary(String word) {
                 try {
-                  final updated = {...dictionary, word}.toList()..sort();
-                  dictionaryFile.parent.createSync(recursive: true);
-                  dictionaryFile.writeAsStringSync(
-                    dictionary_json.jsonEncode(updated), flush: true,
-                  );
-                  refresh(() {
-                    dictionary.add(word);
-                    reviewError = null;
-                  });
+                  saveDictionaryWord(word);
+                  refresh(() => reviewError = null);
                 } catch (error) {
                   refresh(() => reviewError = 'No se pudo guardar el diccionario: $error');
                 }
@@ -491,7 +498,14 @@ class _EditorScreenState extends State<EditorScreen> {
                                             draft.substring(start, end)) {
                                           return;
                                         }
-                                        await applyReplacement(draft.replaceRange(start, end, edited));
+                                        final word = edited.trim();
+                                        final addWord = isEnglishSpellingWarning(match) &&
+                                            RegExp(r"^[\p{L}\p{M}]+(?:[-’'][\p{L}\p{M}]+)*$", unicode: true)
+                                                .hasMatch(word);
+                                        await applyReplacement(
+                                          draft.replaceRange(start, end, edited),
+                                          dictionaryWord: addWord ? word : null,
+                                        );
                                       },
                                     ),
                                     if (replacements is List)

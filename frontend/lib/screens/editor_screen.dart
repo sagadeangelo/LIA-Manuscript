@@ -631,21 +631,25 @@ class _EditorScreenState extends State<EditorScreen> {
         return;
       }
 
-      final record = docxTemplateRecord(mid);
-      var templatePath = await record.exists()
-          ? await record.readAsString() : '';
-      if (templatePath.isEmpty || !await dictionary_io.File(templatePath).exists()) {
-        if (!mounted) {
-          return;
+      var bytes = await api.exportDocx(widget.projectId, mid, vid);
+      if (bytes == null) {
+        final record = docxTemplateRecord(mid);
+        var templatePath = await record.exists() ? await record.readAsString() : '';
+        if (templatePath.isEmpty || !await dictionary_io.File(templatePath).exists()) {
+          if (!mounted) {
+            return;
+          }
+          final template = await openFile(acceptedTypeGroups: [word]);
+          if (template == null || !mounted) {
+            return;
+          }
+          templatePath = template.path;
         }
-        final template = await openFile(acceptedTypeGroups: [word]);
-        if (template == null || !mounted) {
-          return;
-        }
-        templatePath = template.path;
+        bytes = await api.exportDocx(widget.projectId, mid, vid, templatePath);
       }
-      final bytes = await api.exportDocx(widget.projectId, mid, vid, templatePath);
-      await rememberDocxTemplate(mid, templatePath);
+      if (bytes == null) {
+        throw StateError('Falta el DOCX original.');
+      }
       if (!mounted) {
         return;
       }

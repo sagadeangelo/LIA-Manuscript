@@ -62,7 +62,7 @@ _DITOX_COVER = [
 
 
 
-def _translate_front_matter(sections, terms, model, on_progress):
+def _translate_lines(sections, terms, model, on_progress):
     pieces = []
     for index, section in enumerate(sections):
         lines = [line.strip() for line in section.splitlines() if line.strip()]
@@ -90,89 +90,73 @@ def _translate_front_matter(sections, terms, model, on_progress):
 
     total = sum(needs_translation is True for _, needs_translation in pieces)
     if total == 0:
-        raise ValueError("El prefacio no contiene parrafos traducibles.")
+        raise ValueError("El capitulo no contiene parrafos traducibles.")
     if on_progress:
         on_progress(0, total)
 
-    outputs, warnings = [], []
-    completed = 0
     prose = [source.strip() for source, needs_translation in pieces if needs_translation]
+    results = {}
+    failures = {}
+
+    def translate_piece(index):
+        result = translate_and_review(
+            prose[index], protected_terms=terms, model=model,
+            previous=prose[index - 1] if index else "",
+            following=prose[index + 1] if index + 1 < total else "",
+        )
+        translated = result["translation"].strip()
+        if not translated:
+            raise ValueError("Ollama devolvio una traduccion vacia.")
+        if len(translated.splitlines()) != 1:
+            raise ValueError("La traduccion cambio la estructura del parrafo.")
+        results[index] = (translated, result["warnings"])
+        failures.pop(index, None)
+        if on_progress:
+            on_progress(len(results), total)
+
+    # Retry only missing pieces before assembling or saving the chapter.
+    for index in range(total):
+        try:
+            translate_piece(index)
+        except (OllamaError, ValueError) as exc:
+            failures[index] = exc
+
+    for index in list(failures):
+        try:
+            translate_piece(index)
+        except (OllamaError, ValueError) as exc:
+            failures[index] = exc
+
+    if failures:
+        details = "; ".join(
+            f"tramo {index + 1}/{total}: {error}"
+            for index, error in failures.items()
+        )
+        message = f"{model or 'Modelo predeterminado'} - capitulo incompleto: {details}"
+        if any(isinstance(error, OllamaError) for error in failures.values()):
+            raise OllamaError(message)
+        raise ValueError(message)
+
+    outputs, warnings = [], []
+    index = 0
     for source, needs_translation in pieces:
         if not needs_translation:
             outputs.append(source)
             continue
-
-        number = completed + 1
-        try:
-            result = translate_and_review(
-                source.strip(), protected_terms=terms, model=model,
-                previous=prose[completed - 1] if completed else "",
-                following=prose[number] if number < total else "",
-            )
-            translated = result["translation"].strip()
-            if not translated:
-                raise ValueError("Ollama devolvio una traduccion vacia.")
-        except (OllamaError, ValueError) as exc:
-            raise type(exc)(
-                f"{model or 'Modelo predeterminado'} - parrafo o tramo {number}/{total}: {exc}"
-            ) from exc
-
+        translated, notices = results[index]
         leading = source[:len(source) - len(source.lstrip())]
         trailing = source[len(source.rstrip()):]
         outputs.append(leading + translated + trailing)
-        warnings.extend({**warning, "segment": number} for warning in result["warnings"])
-        completed += 1
-        if on_progress:
-            on_progress(completed, total)
-
+        warnings.extend({**warning, "segment": index + 1} for warning in notices)
+        index += 1
     return {"translation": "".join(outputs), "segments": total, "warnings": warnings}
 
 
 def translate_chapter(
-    text: str, terms: list[str], model: str | None = None,
+    text: str, terms: list[str] | dict[str, str], model: str | None = None,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> dict:
     front_matter_sections = re.split(
         r"(?im)(?=^[ \t]*(?:dedicatoria|prefacio)[ \t]*\r?$)", text
     )
-    if len(front_matter_sections) > 1:
-        return _translate_front_matter(front_matter_sections, terms, model, on_progress)
-    segments = [
-        segment
-        for section in front_matter_sections if section.strip()
-        for segment in split_segments(section) if segment.strip()
-    ]
-    outputs, warnings = [], []
-    if on_progress:
-        on_progress(0, len(segments))
-    for i, segment in enumerate(segments):
-        if i == 0 and [
-            line.strip() for line in segment.splitlines() if line.strip()
-        ] == _DITOX_COVER:
-            outputs.append(segment)
-            if on_progress:
-                on_progress(i + 1, len(segments))
-            continue
-
-        try:
-            result = translate_and_review(
-                segment, protected_terms=terms, model=model,
-                previous=segments[i - 1] if i else "",
-                following=segments[i + 1] if i + 1 < len(segments) else "",
-            )
-        except (OllamaError, ValueError) as exc:
-            raise type(exc)(
-                f"{model or 'Modelo predeterminado'} - segmento {i + 1}/{len(segments)} "
-                f"({len(segment)} caracteres): {exc}"
-            ) from exc
-        if not result["translation"].strip():
-            raise ValueError(f"Ollama devolvio una traduccion vacia en el segmento {i + 1}")
-        if outputs:
-            previous = segments[i - 1]
-            separator = previous[len(previous.rstrip()):] + segment[:len(segment) - len(segment.lstrip())]
-            outputs.append(separator or "\\n\\n")
-        outputs.append(result["translation"])
-        if on_progress:
-            on_progress(i + 1, len(segments))
-        warnings.extend([{**w, "segment": i + 1} for w in result["warnings"]])
-    return {"translation": "".join(outputs), "segments": len(segments), "warnings": warnings}
+    return _translate_lines(front_matter_sections, terms, model, on_progress)

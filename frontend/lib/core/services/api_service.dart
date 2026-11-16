@@ -80,14 +80,14 @@ class ApiService {
     }
   }
 
-  Future<List<int>> exportDocx(
+  Future<List<int>?> exportDocx(
     String pid,
     String mid,
     String vid,
-    String originalPath,
+    [String? originalPath]
   ) async {
-    final file = File(originalPath);
-    final length = await file.length();
+    final file = originalPath == null ? null : File(originalPath);
+    final length = file == null ? 0 : await file.length();
     if (length > 15 * 1024 * 1024) {
       throw StateError('El DOCX supera 15 MB.');
     }
@@ -102,22 +102,27 @@ class ApiService {
             ),
           )
           .timeout(limit);
-      req.headers.set(
-        HttpHeaders.contentTypeHeader,
-        'multipart/form-data; boundary=$boundary',
-      );
-      req.write(
-        '--$boundary\r\n'
-        'Content-Disposition: form-data; name="file"; filename="original.docx"\r\n'
-        'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n',
-      );
-      await req.addStream(file.openRead()).timeout(limit);
-      req.write('\r\n--$boundary--\r\n');
+      if (file != null) {
+        req.headers.set(
+          HttpHeaders.contentTypeHeader,
+          'multipart/form-data; boundary=$boundary',
+        );
+        req.write(
+          '--$boundary\r\n'
+          'Content-Disposition: form-data; name="file"; filename="original.docx"\r\n'
+          'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n',
+        );
+        await req.addStream(file.openRead()).timeout(limit);
+        req.write('\r\n--$boundary--\r\n');
+      }
       final res = await req.close().timeout(limit);
       if (res.statusCode != 200) {
         final detail = jsonDecode(
           await utf8.decoder.bind(res).join().timeout(limit),
         );
+        if (res.statusCode == 409 && detail['detail'] == 'DOCX_TEMPLATE_REQUIRED') {
+          return null;
+        }
         throw StateError('${detail['detail']}');
       }
       return await res.expand((chunk) => chunk).toList().timeout(limit);

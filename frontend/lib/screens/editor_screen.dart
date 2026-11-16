@@ -287,36 +287,95 @@ class _EditorScreenState extends State<EditorScreen> {
       final dictionaryFile = englishDictionaryFile();
       final dictionary = readEnglishDictionary(dictionaryFile);
 
-      while (mounted) {
-        final matches =
-            (await api.checkAmericanEnglish(draft)).where((match) {
+      List<Map<String, dynamic>> visibleMatches(
+        String text, List<Map<String, dynamic>> found,
+      ) => found.where((match) {
               final start = match['offset'];
               final length = match['length'];
               if (start is int &&
                   length is int &&
                   start >= 0 &&
                   length > 0 &&
-                  start + length <= draft.length &&
+                  start + length <= text.length &&
                   isEnglishSpellingWarning(match) &&
-                  dictionary.contains(draft.substring(start, start + length))) {
+                  dictionary.contains(text.substring(start, start + length))) {
                 return false;
               }
               return start is int &&
                   length is int &&
                   start >= 0 &&
                   length >= 0 &&
-                  start + length <= draft.length;
+                  start + length <= text.length;
             }).toList()..sort(
               (a, b) => (a['offset'] as int).compareTo(b['offset'] as int),
             );
-        if (!mounted) {
-          return;
-        }
 
-        final action = await showDialog<String>(
+      var found = await api.checkAmericanEnglish(draft);
+      if (!mounted) {
+        return;
+      }
+      var updating = false;
+      String? reviewError;
+      final accepted = await showDialog<bool>(
           context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Revisi\u00F3n de ingl\u00E9s americano'),
+          builder: (dialogContext) => StatefulBuilder(
+            builder: (context, refresh) {
+              final matches = visibleMatches(draft, found);
+
+              Future<void> applyReplacement(String updated) async {
+                if (updating || updated == draft) {
+                  return;
+                }
+                refresh(() {
+                  updating = true;
+                  reviewError = null;
+                });
+                try {
+                  final checked = await api.checkAmericanEnglish(updated);
+                  if (!dialogContext.mounted) {
+                    return;
+                  }
+                  refresh(() {
+                    draft = updated;
+                    found = checked;
+                  });
+                } catch (error) {
+                  if (dialogContext.mounted) {
+                    refresh(() => reviewError = 'No se pudo actualizar la revisión: $error');
+                  }
+                } finally {
+                  if (dialogContext.mounted) {
+                    refresh(() => updating = false);
+                  }
+                }
+              }
+
+              void addToDictionary(String word) {
+                try {
+                  final updated = {...dictionary, word}.toList()..sort();
+                  dictionaryFile.parent.createSync(recursive: true);
+                  dictionaryFile.writeAsStringSync(
+                    dictionary_json.jsonEncode(updated), flush: true,
+                  );
+                  refresh(() {
+                    dictionary.add(word);
+                    reviewError = null;
+                  });
+                } catch (error) {
+                  refresh(() => reviewError = 'No se pudo guardar el diccionario: $error');
+                }
+              }
+
+              return AlertDialog(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Revisión de inglés americano'),
+                if (updating) const LinearProgressIndicator(),
+                if (reviewError != null)
+                  Text(reviewError!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 14)),
+              ],
+            ),
             content: SizedBox(
               width: 960,
               height: 520,
@@ -375,15 +434,12 @@ class _EditorScreenState extends State<EditorScreen> {
                                         label: const Text(
                                           'Agregar al diccionario',
                                         ),
-                                        onPressed: () => Navigator.pop(
-                                          dialogContext,
-                                          '\u0000dictionary:${draft.substring(start, end)}',
-                                        ),
+                                        onPressed: updating ? null : () => addToDictionary(draft.substring(start, end)),
                                       ),
                                     TextButton.icon(
                                       icon: const Icon(Icons.edit_outlined),
                                       label: const Text('Editar fragmento'),
-                                      onPressed: () async {
+                                      onPressed: updating ? null : () async {
                                         var replacement = draft.substring(
                                           start,
                                           end,
@@ -435,14 +491,7 @@ class _EditorScreenState extends State<EditorScreen> {
                                             draft.substring(start, end)) {
                                           return;
                                         }
-                                        Navigator.pop(
-                                          dialogContext,
-                                          draft.replaceRange(
-                                            start,
-                                            end,
-                                            edited,
-                                          ),
-                                        );
+                                        await applyReplacement(draft.replaceRange(start, end, edited));
                                       },
                                     ),
                                     if (replacements is List)
@@ -460,13 +509,8 @@ class _EditorScreenState extends State<EditorScreen> {
                                                       ? 'Eliminar'
                                                       : item['value'] as String,
                                                 ),
-                                                onPressed: () => Navigator.pop(
-                                                  dialogContext,
-                                                  draft.replaceRange(
-                                                    start,
-                                                    end,
-                                                    item['value'] as String,
-                                                  ),
+                                                onPressed: updating ? null : () => applyReplacement(
+                                                  draft.replaceRange(start, end, item['value'] as String),
                                                 ),
                                               ),
                                         ],
@@ -486,32 +530,18 @@ class _EditorScreenState extends State<EditorScreen> {
                 child: const Text('Cancelar'),
               ),
               FilledButton(
-                onPressed: draft == original
+                onPressed: updating || draft == original
                     ? null
-                    : () => Navigator.pop(dialogContext, '\u0000save'),
+                    : () => Navigator.pop(dialogContext, true),
                 child: const Text('Guardar versi\u00F3n revisada'),
               ),
             ],
+              );
+            },
           ),
         );
-        if (!mounted || action == null) {
+        if (!mounted || accepted != true) {
           return;
-        }
-        const dictionaryAction = '\u0000dictionary:';
-        if (action.startsWith(dictionaryAction)) {
-          final word = action.substring(dictionaryAction.length);
-          final updated = {...dictionary, word}.toList()..sort();
-          dictionaryFile.parent.createSync(recursive: true);
-          dictionaryFile.writeAsStringSync(
-            dictionary_json.jsonEncode(updated),
-            flush: true,
-          );
-          dictionary.add(word);
-          continue;
-        }
-        if (action != '\u0000save') {
-          draft = action;
-          continue;
         }
 
         final saved = await api.saveRevision(widget.projectId, mid, vid, draft);
@@ -532,8 +562,6 @@ class _EditorScreenState extends State<EditorScreen> {
               .toList();
           status = 'Versi\u00F3n revisada guardada';
         });
-        return;
-      }
     });
   }
 

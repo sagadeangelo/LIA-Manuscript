@@ -9,6 +9,13 @@ from ...services.analysis.chapter_detector import detect_chapters
 
 router = APIRouter(prefix="/api/projects/{project_id}/manuscripts", tags=["manuscripts"])
 
+def ensure_docx_storage(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS manuscript_docx (
+        manuscript_id TEXT PRIMARY KEY REFERENCES manuscripts(id) ON DELETE CASCADE,
+        content BLOB NOT NULL
+    )""")
+
+
 @router.post("", status_code=201)
 async def upload_manuscript(project_id: str, file: UploadFile = File(...)):
     filename = (file.filename or "").replace("\\", "/").split("/")[-1]
@@ -37,6 +44,12 @@ async def upload_manuscript(project_id: str, file: UploadFile = File(...)):
               "text": text, "created_at": datetime.now(timezone.utc).isoformat()}
     with connect() as db:
         db.execute("INSERT INTO manuscripts (id,project_id,filename,text,created_at) VALUES (:id,:project_id,:filename,:text,:created_at)", record)
+        if extension == "docx":
+            ensure_docx_storage(db)
+            db.execute(
+                "INSERT INTO manuscript_docx (manuscript_id, content) VALUES (?, ?)",
+                (record["id"], raw),
+            )
     return {"id": record["id"], "project_id": project_id, "filename": filename,
             "characters": len(text), "chapters": detect_chapters(text)}
 

@@ -923,10 +923,8 @@ class _EditorScreenState extends State<EditorScreen> {
             bookChapterNumber = null;
             bookChapterTitle = null;
             final summary = 'Libro: $saved de ${titles.length} capítulos guardados.';
-            status = failures.isEmpty
-                ? summary
-                : '$summary\nPendientes:\n${failures.join('
-')}';
+            final pending = failures.join('\n');
+            status = pending.isEmpty ? summary : '$summary\nPendientes:\n$pending';
           });
         }
       }

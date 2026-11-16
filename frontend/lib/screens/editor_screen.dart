@@ -29,7 +29,68 @@ class _EditorScreenState extends State<EditorScreen> {
   final translated = TextEditingController();
   final sourceTerm = TextEditingController();
   final targetTerm = TextEditingController();
-  final model = TextEditingController();
+  List<String> installedModels = [];
+  String? selectedModel;
+  bool loadingModels = false;
+  String? modelsError;
+  int completedSegments = 0;
+  int totalSegments = 0;
+  Duration translationElapsed = Duration.zero;
+
+  Future<void> refreshModels() async {
+    if (loadingModels || translating) {
+      return;
+    }
+    setState(() {
+      loadingModels = true;
+      modelsError = null;
+    });
+    final wait = const Duration(seconds: 5);
+    final client = dictionary_io.HttpClient()..connectionTimeout = wait;
+    try {
+      final request = await client.getUrl(
+        Uri.parse('http://127.0.0.1:11434/api/tags'),
+      ).timeout(wait);
+      request.followRedirects = false;
+      final response = await request.close().timeout(wait);
+      if (response.statusCode != 200) {
+        throw StateError('Ollama devolvió HTTP ${response.statusCode}.');
+      }
+      final body = await dictionary_json.utf8.decoder
+          .bind(response).join().timeout(wait);
+      final data = dictionary_json.jsonDecode(body);
+      if (data is! Map || data['models'] is! List) {
+        throw const FormatException('Catálogo de Ollama inválido.');
+      }
+      final names = <String>{};
+      for (final item in data['models'] as List) {
+        if (item is Map) {
+          final name = item['name'] ?? item['model'];
+          if (name is String && name.trim().isNotEmpty) {
+            names.add(name.trim());
+          }
+        }
+      }
+      if (mounted) {
+        setState(() {
+          installedModels = names.toList()..sort();
+          if (!installedModels.contains(selectedModel)) {
+            selectedModel = installedModels.length == 1
+                ? installedModels.single : null;
+          }
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => modelsError = 'No se pudo consultar Ollama. $error');
+      }
+    } finally {
+      client.close(force: true);
+      if (mounted) {
+        setState(() => loadingModels = false);
+      }
+    }
+  }
   List<dynamic> manuscripts = [], chapters = [], versions = [], terms = [];
   String? manuscriptId;
   int chapterIndex = 0;
@@ -39,6 +100,7 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(refreshModels());
     loadManuscripts();
   }
 
@@ -49,7 +111,6 @@ class _EditorScreenState extends State<EditorScreen> {
     translated.dispose();
     sourceTerm.dispose();
     targetTerm.dispose();
-    model.dispose();
     super.dispose();
   }
 
@@ -768,13 +829,24 @@ class _EditorScreenState extends State<EditorScreen> {
       final jobId =
           '${digits.substring(0, 8)}-${digits.substring(8, 12)}-'
           '${digits.substring(12, 16)}-${digits.substring(16, 20)}-${digits.substring(20)}';
+      final activeModel = selectedModel;
+      if (activeModel == null) {
+        return;
+      }
+      final stopwatch = Stopwatch()..start();
       setState(() {
+        completedSegments = 0;
+        totalSegments = 0;
+        translationElapsed = Duration.zero;
         translating = true;
         translationPercent = 0;
         status = 'Traduciendo con Ollama local…';
       });
       var polling = false;
       final timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+        if (mounted) {
+          setState(() => translationElapsed = stopwatch.elapsed);
+        }
         if (polling) return;
         polling = true;
         try {
@@ -788,9 +860,11 @@ class _EditorScreenState extends State<EditorScreen> {
           final completed = progress['completed'] as int;
           if (total > 0) {
             final percent = min(99, 100 * completed ~/ total);
-            setState(
-              () => translationPercent = max(translationPercent, percent),
-            );
+            setState(() {
+              translationPercent = max(translationPercent, percent);
+              totalSegments = total;
+              completedSegments = completed;
+            });
           }
         } on Exception {
           // The translation request reports its own errors.
@@ -804,7 +878,7 @@ class _EditorScreenState extends State<EditorScreen> {
           widget.projectId,
           mid,
           index,
-          model: model.text,
+          model: activeModel,
           jobId: jobId,
         );
         timer.cancel();
@@ -991,13 +1065,41 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: model,
-            decoration: const InputDecoration(
-              labelText: 'Modelo (vacío = predeterminado)',
-              hintText: 'llama3.1:8b',
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: InputDecorator(
+                  decoration: const InputDecoration(labelText: 'Modelo local'),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: selectedModel,
+                      hint: Text(loadingModels ? 'Buscando modelos…' : 'Elige un modelo'),
+                      items: [
+                        for (final name in installedModels)
+                          DropdownMenuItem(
+                            value: name,
+                            child: Text(name, overflow: TextOverflow.ellipsis),
+                          ),
+                      ],
+                      onChanged: busy || loadingModels || modelsError != null
+                          ? null
+                          : (value) => setState(() => selectedModel = value),
+                    ),
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Actualizar modelos',
+                onPressed: busy || loadingModels ? null : refreshModels,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
           ),
+          if (modelsError != null)
+            Text(modelsError!, style: TextStyle(color: Theme.of(context).colorScheme.error))
+          else if (!loadingModels && installedModels.isEmpty)
+            const Text('Ollama no tiene modelos instalados.'),
           const SizedBox(height: 20),
           const Text(
             'Glosario editorial',
@@ -1028,19 +1130,24 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
           const SizedBox(height: 18),
           FilledButton.icon(
-            onPressed: busy || manuscriptId == null ? null : translateChapter,
+            onPressed: busy || manuscriptId == null || selectedModel == null ||
+                loadingModels || modelsError != null ? null : translateChapter,
             icon: const Icon(Icons.auto_awesome),
-            label: const Text('TRADUCIR CAPÍTULO'),
+            label: Text(translating ? 'TRADUCIENDO…' : 'TRADUCIR CAPÍTULO'),
           ),
           if (translating || translationPercent == 100) ...[
             const SizedBox(height: 14),
             LinearProgressIndicator(
-              value: translationPercent / 100,
+              value: translating && translationPercent == 0 ? null : translationPercent / 100,
               color: progressColor,
               semanticsLabel: 'Progreso de traducción',
             ),
             Text(
-              '$translationPercent%',
+              translating
+                  ? totalSegments == 0
+                      ? 'Preparando con $selectedModel · ${translationElapsed.inSeconds} s'
+                      : '$completedSegments de $totalSegments segmentos · ${translationElapsed.inSeconds} s'
+                  : '$translationPercent%',
               style: TextStyle(color: progressColor),
             ),
           ],

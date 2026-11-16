@@ -1251,6 +1251,14 @@ class _EditorScreenState extends State<EditorScreen> {
             icon: const Icon(Icons.library_books_outlined),
             label: const Text('TRADUCIR TODOS LOS CAPÍTULOS'),
           ),
+          const Padding(
+            padding: EdgeInsets.only(top: 8, bottom: 8),
+            child: Text(
+              'Las cosas que valen la pena toman su tiempo. '
+              'Deja que LIA-Manuscript traduzca tu manuscrito.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
           if (bookChapterNumber != null)
             Text('Libro: $bookChapterNumber de $bookChapterTotal · $bookChapterTitle'),
           if (translating || translationPercent == 100) ...[

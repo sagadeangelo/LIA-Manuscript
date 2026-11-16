@@ -613,9 +613,13 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
+      final originalName = template.name.replaceFirst(
+        RegExp(r'\.docx$', caseSensitive: false), '',
+      );
+      final stamp = DateTime.now().toIso8601String().replaceAll(':', '-');
       final location = await getSaveLocation(
         acceptedTypeGroups: [word],
-        suggestedName: 'Prefacio_EN-US_${vid.split('-').first}.docx',
+        suggestedName: '${originalName}_EN-US_${vid.split('-').first}_$stamp.docx',
       );
       if (location == null || !mounted) {
         return;

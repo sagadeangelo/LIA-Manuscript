@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -259,18 +260,51 @@ class ApiService {
     int index, {
     String? model,
     String? jobId,
-  }) async => Map<String, dynamic>.from(
+  }) async {
+    if (jobId == null) {
+      throw ArgumentError('Se requiere un identificador de traduccion.');
+    }
     await request(
       'POST',
-      '/api/projects/$pid/manuscripts/$mid/translate-chapter',
+      '/api/projects/$pid/manuscripts/$mid/translation-jobs',
       body: {
         'chapter_index': index,
         'job_id': jobId,
         'model': model == null || model.trim().isEmpty ? null : model.trim(),
       },
-      timeout: const Duration(minutes: 30),
-    ),
-  );
+      timeout: const Duration(seconds: 15),
+    );
+    var connectionFailures = 0;
+    while (true) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      Map<String, dynamic> progress;
+      try {
+        progress = await translationProgress(pid, mid, jobId);
+        connectionFailures = 0;
+      } catch (_) {
+        connectionFailures++;
+        if (connectionFailures >= 12) {
+          throw StateError(
+            'Se perdio la conexion con el servicio local. La traduccion puede '
+            'seguir activa; revisa las versiones antes de volver a iniciarla.',
+          );
+        }
+        continue;
+      }
+      if (progress['state'] == 'completed') {
+        return Map<String, dynamic>.from(progress['result'] as Map);
+      }
+      if (progress['state'] == 'failed') {
+        throw StateError('HTTP ${progress['status_code']}: ${progress['detail']}');
+      }
+      if (!progress.containsKey('state')) {
+        throw StateError(
+          'El servicio se reinicio o ya no conserva este trabajo. '
+          'Revisa las versiones guardadas antes de volver a traducir.',
+        );
+      }
+    }
+  }
 
   Future<Map<String, dynamic>> upload(String pid, String path) async {
     final file = File(path);

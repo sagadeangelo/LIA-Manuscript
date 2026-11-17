@@ -99,6 +99,8 @@ def _translate_lines(sections, terms, model, on_progress):
     failures = {}
 
     def translate_piece(index):
+        if on_progress:
+            on_progress(len(results), total)
         result = translate_and_review(
             prose[index], protected_terms=terms, model=model,
             previous=prose[index - 1] if index else "",

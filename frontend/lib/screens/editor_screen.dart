@@ -1080,6 +1080,12 @@ class _EditorScreenState extends State<EditorScreen> {
     });
   }
 
+  static const editorRail = Color(0xFF101B2C);
+  static const editorPaper = Color(0xFF121F31);
+  static const editorLine = Color(0xFF2A3B55);
+  static const sourceAccent = Color(0xFF65E5E0);
+  static const targetAccent = Color(0xFFC7AAFF);
+
   Widget panel(
     String title,
     TextEditingController controller,
@@ -1088,9 +1094,9 @@ class _EditorScreenState extends State<EditorScreen> {
   }) => Expanded(
     child: Container(
       decoration: BoxDecoration(
-        color: LiaTheme.surface,
+        color: editorPaper,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: .65)),
+        border: Border.all(color: color.withValues(alpha: .40)),
       ),
       child: Column(
         children: [
@@ -1107,7 +1113,7 @@ class _EditorScreenState extends State<EditorScreen> {
               ],
             ),
           ),
-          const Divider(height: 1),
+          const Divider(height: 1, color: editorLine),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -1117,7 +1123,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 expands: true,
                 maxLines: null,
                 minLines: null,
-                style: const TextStyle(fontSize: 16, height: 1.6),
+                style: const TextStyle(fontSize: 17, height: 1.72),
                 decoration: const InputDecoration(
                   border: InputBorder.none,
                   filled: false,
@@ -1138,7 +1144,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final narrow = MediaQuery.sizeOf(context).width < 1100;
     final nav = Container(
       width: 225,
-      color: LiaTheme.surface,
+      color: editorRail,
       padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1197,9 +1203,9 @@ class _EditorScreenState extends State<EditorScreen> {
       ),
     );
     final settings = Container(
-      width: narrow ? double.infinity : 300,
+      width: narrow ? double.infinity : 312,
       padding: const EdgeInsets.all(18),
-      color: LiaTheme.surface,
+      color: editorRail,
       child: ListView(
         children: [
           const Text(
@@ -1255,34 +1261,6 @@ class _EditorScreenState extends State<EditorScreen> {
             Text(modelsError!, style: TextStyle(color: Theme.of(context).colorScheme.error))
           else if (!loadingModels && installedModels.isEmpty)
             const Text('Ollama no tiene modelos instalados.'),
-          const SizedBox(height: 20),
-          const Text(
-            'Glosario editorial',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          for (final term in terms.take(15))
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Text(
-                '${term['source']} → ${term['target']}',
-                style: const TextStyle(fontSize: 13),
-              ),
-            ),
-          TextField(
-            controller: sourceTerm,
-            decoration: const InputDecoration(labelText: 'Término original'),
-          ),
-          const SizedBox(height: 7),
-          TextField(
-            controller: targetTerm,
-            decoration: const InputDecoration(labelText: 'Equivalencia EN-US'),
-          ),
-          TextButton.icon(
-            onPressed: busy ? null : addGlossary,
-            icon: const Icon(Icons.add),
-            label: const Text('AÑADIR AL GLOSARIO'),
-          ),
           const SizedBox(height: 18),
           FilledButton.icon(
             onPressed: busy || manuscriptId == null || selectedModel == null ||
@@ -1326,9 +1304,9 @@ class _EditorScreenState extends State<EditorScreen> {
           ],
           const SizedBox(height: 22),
           const Text(
-            'VERSIONES GUARDADAS',
+            'REVISIÓN',
             style: TextStyle(
-              color: LiaTheme.violet,
+              color: targetAccent,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -1363,14 +1341,49 @@ class _EditorScreenState extends State<EditorScreen> {
             icon: const Icon(Icons.link),
             label: const Text('VINCULAR DOCX ORIGINAL'),
           ),
-          OutlinedButton.icon(
-            onPressed: busy || loadedVersionId == null ? null : exportSavedDocx,
-            icon: const Icon(Icons.file_download_outlined),
-            label: const Text('EXPORTAR DOCX'),
+          const SizedBox(height: 18),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 8),
+            leading: const Icon(Icons.menu_book_outlined, color: sourceAccent),
+            title: const Text('Glosario editorial'),
+            children: [
+              for (final term in terms.take(15))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Text(
+                    '${term['source']} → ${term['target']}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              TextField(
+                controller: sourceTerm,
+                decoration: const InputDecoration(labelText: 'Término original'),
+              ),
+              const SizedBox(height: 7),
+              TextField(
+                controller: targetTerm,
+                decoration: const InputDecoration(labelText: 'Equivalencia EN-US'),
+              ),
+              TextButton.icon(
+                onPressed: busy ? null : addGlossary,
+                icon: const Icon(Icons.add),
+                label: const Text('AÑADIR AL GLOSARIO'),
+              ),
+            ],
+          ),
+          const Divider(color: editorLine),
+          const Text(
+            'VERSIONES GUARDADAS',
+            style: TextStyle(color: targetAccent, fontWeight: FontWeight.bold),
           ),
           for (final v in versions)
             ListTile(
               dense: true,
+              selected: v['id'] == loadedVersionId,
+              selectedTileColor: targetAccent.withValues(alpha: .12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              leading: Icon(v['id'] == loadedVersionId ? Icons.check_circle_outline : Icons.history),
               title: Text('Versión ${'${v['id']}'.substring(0, 8)}'),
               subtitle: Text('${v['created_at'] ?? ''}'),
               onTap: busy ? null : () => task(() => loadVersion('${v['id']}')),
@@ -1396,22 +1409,24 @@ class _EditorScreenState extends State<EditorScreen> {
                   'EDITOR COMPARATIVO',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
-                const Spacer(),
-                Text(
+                const SizedBox(width: 12),
+                Expanded(child: Text(
                   chapters.isEmpty
                       ? 'Sin capítulos'
                       : '${chapters[chapterIndex]['title']}',
                   style: const TextStyle(color: LiaTheme.muted),
-                ),
+                  textAlign: TextAlign.end,
+                  overflow: TextOverflow.ellipsis,
+                )),
               ],
             ),
             const SizedBox(height: 16),
             Expanded(
               child: Row(
                 children: [
-                  panel('ORIGINAL · ESPAÑOL', original, LiaTheme.cyan),
+                  panel('Original · Español', original, sourceAccent),
                   const SizedBox(width: 12),
-                  panel('TRADUCCIÓN · EN-US', translated, LiaTheme.violet),
+                  panel('Traducción · EN-US', translated, targetAccent),
                 ],
               ),
             ),
@@ -1421,15 +1436,19 @@ class _EditorScreenState extends State<EditorScreen> {
     );
     return Scaffold(
       appBar: AppBar(
-        title: Text('LIA MANUSCRIPT  /  ${widget.projectName}'),
+        title: Text(
+          'LIA-Manuscript  /  ${widget.projectName}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        ),
         actions: [
-          const Padding(
-            padding: EdgeInsets.only(right: 20),
-            child: Center(
-              child: Text(
-                'DATOS REALES · SQLITE',
-                style: TextStyle(color: LiaTheme.violet, fontSize: 12),
-              ),
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: TextButton.icon(
+              onPressed: busy || loadedVersionId == null ? null : exportSavedDocx,
+              icon: const Icon(Icons.file_download_outlined),
+              label: const Text('Exportar DOCX'),
             ),
           ),
         ],

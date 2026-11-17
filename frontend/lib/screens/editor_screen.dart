@@ -985,10 +985,32 @@ class _EditorScreenState extends State<EditorScreen> {
       for (final chapter in chapters) '${chapter['title']}',
     ];
     await task(() async {
+      final history = await api.versions(widget.projectId, mid);
+      if (!mounted) {
+        return;
+      }
+      final completed = <int>{
+        for (final version in history)
+          if (version is Map &&
+              version['chapter_index'] is int &&
+              version['characters'] is num &&
+              (version['characters'] as num) > 0)
+            version['chapter_index'] as int,
+      };
+      final queue = [
+        for (var index = 0; index < titles.length; index++)
+          if (!completed.contains(index)) index,
+      ];
+      final skipped = titles.length - queue.length;
+      if (queue.isEmpty) {
+        setState(() => status = 'Todos los capítulos ya tienen una traducción guardada.');
+        return;
+      }
       final failures = <String>[];
       var saved = 0;
       try {
-        for (var i = 0; i < titles.length; i++) {
+        for (var position = 0; position < queue.length; position++) {
+          final i = queue[position];
           if (!mounted) {
             return;
           }
@@ -1003,8 +1025,8 @@ class _EditorScreenState extends State<EditorScreen> {
           }
           setState(() {
             bookWaiting = false;
-            bookChapterNumber = i + 1;
-            bookChapterTotal = titles.length;
+            bookChapterNumber = position + 1;
+            bookChapterTotal = queue.length;
             bookChapterTitle = titles[i];
           });
           try {
@@ -1028,7 +1050,8 @@ class _EditorScreenState extends State<EditorScreen> {
             bookWaiting = false;
             bookPause = null;
             final summary = '${stopped ? 'Traducción detenida' : 'Libro'}: '
-                '$saved de ${titles.length} capítulos guardados.';
+                '$saved de ${queue.length} capítulos pendientes traducidos. '
+                '$skipped ya tenían una versión guardada.';
             final pending = failures.join('\n');
             status = pending.isEmpty ? summary : '$summary\nPendientes:\n$pending';
           });
@@ -1445,7 +1468,7 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           ),
           if (bookChapterNumber != null) ...[
-            Text('Libro: $bookChapterNumber de $bookChapterTotal · $bookChapterTitle'),
+            Text('Cola: $bookChapterNumber de $bookChapterTotal · $bookChapterTitle'),
             Wrap(
               spacing: 8,
               children: [

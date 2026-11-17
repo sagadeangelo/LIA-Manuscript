@@ -622,8 +622,12 @@ class _EditorScreenState extends State<EditorScreen> {
         return;
       }
       await api.linkDocxTemplate(widget.projectId, mid, template.path);
+      final found = await api.manuscripts(widget.projectId);
       if (mounted) {
-        setState(() => status = 'DOCX original vinculado. Ya puedes exportar.');
+        setState(() {
+          manuscripts = found;
+          status = 'DOCX original vinculado. Ya puedes exportar.';
+        });
       }
     });
   }
@@ -1350,7 +1354,11 @@ class _EditorScreenState extends State<EditorScreen> {
             label: const Text('REVISAR INGL\u00C9S EN-US'),
           ),
 
-          OutlinedButton.icon(
+          if (manuscriptId != null && manuscripts.any((item) =>
+              item['id'] == manuscriptId &&
+              '${item['filename']}'.toLowerCase().endsWith('.docx') &&
+              item['has_docx'] != 1))
+            OutlinedButton.icon(
             onPressed: busy || manuscriptId == null ? null : linkOriginalDocx,
             icon: const Icon(Icons.link),
             label: const Text('VINCULAR DOCX ORIGINAL'),

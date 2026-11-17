@@ -58,7 +58,12 @@ def list_manuscripts(project_id: str):
     with connect() as db:
         if db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone() is None:
             raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-        rows = db.execute("SELECT id,filename,created_at,length(text) AS characters FROM manuscripts WHERE project_id=? ORDER BY created_at DESC", (project_id,)).fetchall()
+        ensure_docx_storage(db)
+        rows = db.execute("""
+            SELECT m.id, m.filename, m.created_at, length(m.text) AS characters,
+                   EXISTS(SELECT 1 FROM manuscript_docx d WHERE d.manuscript_id = m.id) AS has_docx
+            FROM manuscripts m WHERE m.project_id=? ORDER BY m.created_at DESC
+        """, (project_id,)).fetchall()
     return [dict(row) for row in rows]
 
 @router.get("/{manuscript_id}")

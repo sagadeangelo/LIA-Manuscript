@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from lxml import etree
 
 import sqlite3
-from threading import Condition
+from threading import Condition, Thread
 from typing import Literal
 from uuid import UUID
 from fastapi import APIRouter, HTTPException
@@ -27,6 +27,7 @@ router = APIRouter(prefix="/api/projects/{project_id}", tags=["literary-step4"])
 _progress: dict[tuple[str, str, UUID], tuple[int, int]] = {}
 _progress_lock = Condition()
 _controls = {}
+_jobs = {}
 
 
 class TranslationStopped(Exception):
@@ -52,10 +53,10 @@ def control_translation(project_id: str, manuscript_id: str, job_id: UUID, paylo
 @router.get("/manuscripts/{manuscript_id}/translation-progress/{job_id}")
 def translation_progress(project_id: str, manuscript_id: str, job_id: UUID):
     with _progress_lock:
-        current = _progress.get((project_id, manuscript_id, job_id))
-    if current is None:
-        return {"completed": 0, "total": 0}
-    return {"completed": current[0], "total": current[1]}
+        key = (project_id, manuscript_id, job_id)
+        current = _progress.get(key, (0, 0))
+        job = dict(_jobs.get(key, {}))
+    return {"completed": current[0], "total": current[1], **job}
 
 
 class GlossaryEntry(BaseModel):
@@ -71,6 +72,45 @@ class ChapterRequest(BaseModel):
     chapter_index: int = Field(ge=0)
     model: str | None = None
     job_id: UUID | None = None
+
+
+@router.post("/manuscripts/{manuscript_id}/translation-jobs", status_code=202)
+def start_translation_job(project_id: str, manuscript_id: str, payload: ChapterRequest):
+    if payload.job_id is None:
+        raise HTTPException(status_code=422, detail="Se requiere job_id")
+    chunks = chapter_slices(manuscript_text(project_id, manuscript_id))
+    if payload.chapter_index >= len(chunks) or not chunks[payload.chapter_index]["text"].strip():
+        raise HTTPException(status_code=422, detail="Capitulo invalido o vacio")
+    key = (project_id, manuscript_id, payload.job_id)
+    with _progress_lock:
+        if key in _jobs:
+            raise HTTPException(status_code=409, detail="Trabajo ya registrado")
+        if any(k[:2] == key[:2] and v["state"] == "running" for k, v in _jobs.items()):
+            raise HTTPException(status_code=409, detail="Ya hay una traduccion activa para este manuscrito")
+        terminal = [k for k, v in _jobs.items() if v["state"] != "running"]
+        for old in terminal[:-63]:
+            _jobs.pop(old, None)
+        _jobs[key] = {"state": "running"}
+
+    def run():
+        try:
+            result = translate_one_chapter(project_id, manuscript_id, payload)
+            outcome = {"state": "completed", "result": result}
+        except HTTPException as exc:
+            outcome = {"state": "failed", "status_code": exc.status_code, "detail": exc.detail}
+        except Exception:
+            outcome = {"state": "failed", "status_code": 500,
+                       "detail": "Error interno durante la traduccion. Revisa el servicio local."}
+        with _progress_lock:
+            _jobs[key] = outcome
+
+    try:
+        Thread(target=run, daemon=True).start()
+    except Exception:
+        with _progress_lock:
+            _jobs.pop(key, None)
+        raise HTTPException(status_code=503, detail="No se pudo iniciar la traduccion")
+    return {"job_id": str(payload.job_id), "state": "running"}
 
 
 def manuscript_text(project_id: str, manuscript_id: str) -> str:
@@ -152,8 +192,6 @@ def translate_one_chapter(project_id: str, manuscript_id: str, payload: ChapterR
     selected = chapters[payload.chapter_index]
     if not selected["text"].strip():
         raise HTTPException(status_code=422, detail="Capitulo vacio")
-    if len(selected["text"]) > 30000:
-        raise HTTPException(status_code=422, detail="Capitulo demasiado largo para modo sincrono")
     initialize_step4()
     glossary_entries = list_glossary(project_id)
     terms = {entry["source"]: entry["target"] for entry in glossary_entries}

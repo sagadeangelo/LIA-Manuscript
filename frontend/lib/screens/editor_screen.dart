@@ -168,6 +168,7 @@ class _EditorScreenState extends State<EditorScreen> {
       chapterIndex = 0;
       versions = [];
       loadedVersionId = null;
+      coverageNotice = null;
       original.clear();
       translated.clear();
     });
@@ -188,6 +189,7 @@ class _EditorScreenState extends State<EditorScreen> {
       original.text = '${detail['text']}';
       translated.clear();
       loadedVersionId = null;
+      coverageNotice = null;
       translationPercent = 0;
       versions = relevant;
       status = 'Capítulo cargado';
@@ -690,6 +692,7 @@ class _EditorScreenState extends State<EditorScreen> {
       docx_bytes.Uint8List.fromList(bytes);
 
   String? loadedVersionId;
+  String? coverageNotice;
 
   Future<void> reviewVersion({bool onlyWarnings = false}) async {
     final mid = manuscriptId;
@@ -913,10 +916,19 @@ class _EditorScreenState extends State<EditorScreen> {
     if (text is! String || text.trim().isEmpty) {
       throw StateError('La versión guardada no contiene texto traducido.');
     }
+    final source = result['source_text'];
+    int countLines(String value) =>
+        value.split(RegExp(r'[\r\n]')).where((line) => line.trim().isNotEmpty).length;
+    final expected = source is String ? countLines(source) : 0;
+    final actual = countLines(text);
     if (mounted) {
       setState(() {
         translated.text = text;
         loadedVersionId = id;
+        coverageNotice = actual < expected
+            ? 'Posible traducción incompleta: el original tiene $expected '
+                'párrafos con texto y esta versión tiene $actual.'
+            : null;
         status = 'Versión recuperada: $id';
       });
     }
@@ -1467,6 +1479,28 @@ class _EditorScreenState extends State<EditorScreen> {
               style: TextStyle(fontSize: 12),
             ),
           ),
+          if (coverageNotice != null)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(coverageNotice!, style: TextStyle(
+                      color: palette.review,
+                      fontWeight: FontWeight.w600,
+                    )),
+                    TextButton(
+                      onPressed: busy || selectedModel == null ||
+                              loadingModels || modelsError != null
+                          ? null
+                          : translateChapter,
+                      child: const Text('Volver a traducir este capítulo'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           if (bookChapterNumber != null) ...[
             Text('Cola: $bookChapterNumber de $bookChapterTotal · $bookChapterTitle'),
             Wrap(

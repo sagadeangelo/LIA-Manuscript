@@ -100,6 +100,7 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(loadSkinPreference());
     unawaited(refreshModels());
     loadManuscripts();
   }
@@ -1136,11 +1137,110 @@ class _EditorScreenState extends State<EditorScreen> {
     });
   }
 
-  static const editorRail = Color(0xFF101B2C);
-  static const editorPaper = Color(0xFF121F31);
-  static const editorLine = Color(0xFF2A3B55);
-  static const sourceAccent = Color(0xFF65E5E0);
-  static const targetAccent = Color(0xFFC7AAFF);
+  String skin = 'midnight';
+
+  ({
+    Color background, Color rail, Color paper, Color line, Color foreground,
+    Color muted, Color source, Color target, Color selection, Color progress,
+    Color success, Color review, Brightness brightness,
+  }) get palette => switch (skin) {
+    'light' => (
+      background: const Color(0xFFFFFCF5), rail: const Color(0xFFF7F3EB),
+      paper: Colors.white, line: const Color(0xFFD9D0E0),
+      foreground: const Color(0xFF241830), muted: const Color(0xFF63566D),
+      source: const Color(0xFF28632F), target: const Color(0xFF6924A6),
+      selection: const Color(0xFFFFD84D), progress: const Color(0xFFC65305),
+      success: const Color(0xFF32723A), review: const Color(0xFFAB286F),
+      brightness: Brightness.light,
+    ),
+    'forest' => (
+      background: const Color(0xFF0D241D), rail: const Color(0xFF132E25),
+      paper: const Color(0xFF18382C), line: const Color(0xFF49695A),
+      foreground: const Color(0xFFF7EBDD), muted: const Color(0xFFC6D4C3),
+      source: const Color(0xFFB8DBAB), target: const Color(0xFFF0AC83),
+      selection: const Color(0xFF395648), progress: const Color(0xFFFFB27C),
+      success: const Color(0xFFB8DBAB), review: const Color(0xFFF4B3A3),
+      brightness: Brightness.dark,
+    ),
+    _ => (
+      background: LiaTheme.background, rail: const Color(0xFF101B2C),
+      paper: const Color(0xFF121F31), line: const Color(0xFF2A3B55),
+      foreground: LiaTheme.text, muted: LiaTheme.muted,
+      source: const Color(0xFF65E5E0), target: const Color(0xFFC7AAFF),
+      selection: const Color(0xFF243556), progress: const Color(0xFFC7AAFF),
+      success: const Color(0xFF69FF88), review: const Color(0xFFC7AAFF),
+      brightness: Brightness.dark,
+    ),
+  };
+
+  dictionary_io.File skinPreferenceFile() => dictionary_io.File(
+    '${englishDictionaryFile().parent.path}'
+    '${dictionary_io.Platform.pathSeparator}editor-theme.txt',
+  );
+
+  Future<void> loadSkinPreference() async {
+    try {
+      final file = skinPreferenceFile();
+      if (!await file.exists()) {
+        return;
+      }
+      final saved = (await file.readAsString()).trim();
+      if (mounted && const ['light', 'midnight', 'forest'].contains(saved)) {
+        setState(() => skin = saved);
+      }
+    } on dictionary_io.FileSystemException {
+      // The editor can use its default theme if preferences are unavailable.
+    }
+  }
+
+  Future<void> selectSkin(String value) async {
+    setState(() => skin = value);
+    try {
+      final file = skinPreferenceFile();
+      await file.parent.create(recursive: true);
+      await file.writeAsString(value, flush: true);
+    } on dictionary_io.FileSystemException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo guardar la preferencia de tema.')),
+        );
+      }
+    }
+  }
+
+  ThemeData get editorTheme {
+    final p = palette;
+    final scheme = ColorScheme.fromSeed(
+      seedColor: p.target,
+      brightness: p.brightness,
+    ).copyWith(
+      primary: p.target,
+      onPrimary: p.brightness == Brightness.light ? Colors.white : p.background,
+      surface: p.paper,
+      onSurface: p.foreground,
+    );
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: p.background,
+      appBarTheme: AppBarTheme(backgroundColor: p.rail, foregroundColor: p.foreground),
+      dividerColor: p.line,
+      listTileTheme: ListTileThemeData(
+        selectedColor: p.foreground,
+        selectedTileColor: p.selection,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: p.paper,
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: p.line),
+        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
 
   Widget panel(
     String title,
@@ -1150,7 +1250,7 @@ class _EditorScreenState extends State<EditorScreen> {
   }) => Expanded(
     child: Container(
       decoration: BoxDecoration(
-        color: editorPaper,
+        color: palette.paper,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: color.withValues(alpha: .40)),
       ),
@@ -1169,7 +1269,7 @@ class _EditorScreenState extends State<EditorScreen> {
               ],
             ),
           ),
-          const Divider(height: 1, color: editorLine),
+          Divider(height: 1, color: palette.line),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -1195,21 +1295,23 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   Widget build(BuildContext context) {
     final progressColor = translationPercent == 100
-        ? const Color(0xFF69FF88)
-        : Color.lerp(LiaTheme.cyan, LiaTheme.violet, translationPercent / 100)!;
+        ? palette.success
+        : palette.progress;
     final narrow = MediaQuery.sizeOf(context).width < 1100;
-    final nav = Container(
+    final nav = SizedBox(
       width: 225,
-      color: editorRail,
-      padding: const EdgeInsets.all(12),
-      child: Column(
+      child: Material(
+        color: palette.rail,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.all(12),
+          Padding(
+            padding: const EdgeInsets.all(12),
             child: Text(
               'MANUSCRITOS',
-              style: TextStyle(color: LiaTheme.cyan, letterSpacing: 1.2),
+              style: TextStyle(color: palette.source, letterSpacing: 1.2),
             ),
           ),
           OutlinedButton.icon(
@@ -1232,11 +1334,11 @@ class _EditorScreenState extends State<EditorScreen> {
                   : () => task(() => selectManuscript('${m['id']}')),
             ),
           const Divider(),
-          const Padding(
-            padding: EdgeInsets.all(12),
+          Padding(
+            padding: const EdgeInsets.all(12),
             child: Text(
               'CAPÍTULOS',
-              style: TextStyle(color: LiaTheme.cyan, letterSpacing: 1.2),
+              style: TextStyle(color: palette.source, letterSpacing: 1.2),
             ),
           ),
           Expanded(
@@ -1257,17 +1359,19 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
         ],
       ),
+        ),
+      ),
     );
     final settings = Container(
       width: narrow ? double.infinity : 312,
       padding: const EdgeInsets.all(18),
-      color: editorRail,
+      color: palette.rail,
       child: ListView(
         children: [
-          const Text(
+          Text(
             'PANEL DE TRADUCCIÓN',
             style: TextStyle(
-              color: LiaTheme.violet,
+              color: palette.target,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.1,
             ),
@@ -1275,10 +1379,10 @@ class _EditorScreenState extends State<EditorScreen> {
           const SizedBox(height: 22),
           const Text('Proveedor de IA'),
           const SizedBox(height: 8),
-          const Card(
+          Card(
             child: ListTile(
               title: Text('Ollama (local)'),
-              leading: Icon(Icons.memory, color: LiaTheme.cyan),
+              leading: Icon(Icons.memory, color: palette.source),
             ),
           ),
           const SizedBox(height: 12),
@@ -1390,10 +1494,10 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           ],
           const SizedBox(height: 22),
-          const Text(
+          Text(
             'REVISIÓN',
             style: TextStyle(
-              color: targetAccent,
+              color: palette.review,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -1432,7 +1536,7 @@ class _EditorScreenState extends State<EditorScreen> {
           ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: const EdgeInsets.only(bottom: 8),
-            leading: const Icon(Icons.menu_book_outlined, color: sourceAccent),
+            leading: Icon(Icons.menu_book_outlined, color: palette.source),
             title: const Text('Glosario editorial'),
             children: [
               for (final term in terms.take(15))
@@ -1459,16 +1563,16 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
             ],
           ),
-          const Divider(color: editorLine),
-          const Text(
+          Divider(color: palette.line),
+          Text(
             'VERSIONES GUARDADAS',
-            style: TextStyle(color: targetAccent, fontWeight: FontWeight.bold),
+            style: TextStyle(color: palette.target, fontWeight: FontWeight.bold),
           ),
           for (final v in versions)
             ListTile(
               dense: true,
               selected: v['id'] == loadedVersionId,
-              selectedTileColor: targetAccent.withValues(alpha: .12),
+              selectedTileColor: palette.target.withValues(alpha: .12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               leading: Icon(v['id'] == loadedVersionId ? Icons.check_circle_outline : Icons.history),
               title: Text('Versión ${'${v['id']}'.substring(0, 8)}'),
@@ -1478,7 +1582,7 @@ class _EditorScreenState extends State<EditorScreen> {
           const SizedBox(height: 20),
           Text(
             status,
-            style: const TextStyle(color: LiaTheme.muted, fontSize: 12),
+            style: TextStyle(color: palette.muted, fontSize: 12),
           ),
         ],
       ),
@@ -1490,7 +1594,7 @@ class _EditorScreenState extends State<EditorScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.compare_arrows, color: LiaTheme.cyan),
+                Icon(Icons.compare_arrows, color: palette.source),
                 const SizedBox(width: 8),
                 const Text(
                   'EDITOR COMPARATIVO',
@@ -1501,7 +1605,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   chapters.isEmpty
                       ? 'Sin capítulos'
                       : '${chapters[chapterIndex]['title']}',
-                  style: const TextStyle(color: LiaTheme.muted),
+                  style: TextStyle(color: palette.muted),
                   textAlign: TextAlign.end,
                   overflow: TextOverflow.ellipsis,
                 )),
@@ -1511,9 +1615,9 @@ class _EditorScreenState extends State<EditorScreen> {
             Expanded(
               child: Row(
                 children: [
-                  panel('Original · Español', original, sourceAccent),
+                  panel('Original · Español', original, palette.source),
                   const SizedBox(width: 12),
-                  panel('Traducción · EN-US', translated, targetAccent),
+                  panel('Traducción · EN-US', translated, palette.target),
                 ],
               ),
             ),
@@ -1521,7 +1625,9 @@ class _EditorScreenState extends State<EditorScreen> {
         ),
       ),
     );
-    return Scaffold(
+    return Theme(
+      data: editorTheme,
+      child: Scaffold(
       appBar: AppBar(
         title: Text(
           'LIA-Manuscript  /  ${widget.projectName}',
@@ -1530,6 +1636,23 @@ class _EditorScreenState extends State<EditorScreen> {
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Preferencias de apariencia',
+            icon: const Icon(Icons.settings_outlined),
+            onSelected: selectSkin,
+            itemBuilder: (_) => [
+              for (final option in const {
+                'light': 'Luz editorial',
+                'midnight': 'Medianoche',
+                'forest': 'Bosque y cobre',
+              }.entries)
+                CheckedPopupMenuItem(
+                  value: option.key,
+                  checked: option.key == skin,
+                  child: Text(option.value),
+                ),
+            ],
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: TextButton.icon(
@@ -1546,6 +1669,7 @@ class _EditorScreenState extends State<EditorScreen> {
       bottomNavigationBar: narrow
           ? SizedBox(height: 260, child: settings)
           : null,
+      ),
     );
   }
 }

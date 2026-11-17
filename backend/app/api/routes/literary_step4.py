@@ -9,7 +9,8 @@ from fastapi.responses import Response
 from lxml import etree
 
 import sqlite3
-from threading import Lock
+from threading import Condition
+from typing import Literal
 from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -24,7 +25,28 @@ from ...services.providers.ollama_provider import OllamaError
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["literary-step4"])
 
 _progress: dict[tuple[str, str, UUID], tuple[int, int]] = {}
-_progress_lock = Lock()
+_progress_lock = Condition()
+_controls = {}
+
+
+class TranslationStopped(Exception):
+    pass
+
+
+class TranslationControl(BaseModel):
+    action: Literal["pause", "resume", "stop"]
+
+
+@router.put("/manuscripts/{manuscript_id}/translation-progress/{job_id}/control")
+def control_translation(project_id: str, manuscript_id: str, job_id: UUID, payload: TranslationControl):
+    key = (project_id, manuscript_id, job_id)
+    with _progress_lock:
+        if key not in _progress:
+            raise HTTPException(status_code=404, detail="La traduccion ya no esta activa.")
+        if _controls.get(key) != "stop":
+            _controls[key] = payload.action
+        _progress_lock.notify_all()
+    return {"action": payload.action}
 
 
 @router.get("/manuscripts/{manuscript_id}/translation-progress/{job_id}")
@@ -146,9 +168,16 @@ def translate_one_chapter(project_id: str, manuscript_id: str, payload: ChapterR
         if key is not None:
             with _progress_lock:
                 _progress[key] = (completed, total)
+                ready = _progress_lock.wait_for(
+                    lambda: _controls.get(key) != "pause", timeout=25 * 60,
+                )
+                if not ready or _controls.get(key) == "stop":
+                    raise TranslationStopped()
 
     try:
         translated = translate_chapter(selected["text"], terms, payload.model, update_progress)
+    except TranslationStopped as exc:
+        raise HTTPException(status_code=409, detail="Traduccion detenida. El capitulo en curso no se guardo.") from exc
     except OllamaError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
@@ -157,6 +186,7 @@ def translate_one_chapter(project_id: str, manuscript_id: str, payload: ChapterR
         if key is not None:
             with _progress_lock:
                 _progress.pop(key, None)
+                _controls.pop(key, None)
     result = add_version(project_id, manuscript_id, payload.chapter_index,
                          selected["title"], selected["text"],
                          translated["translation"], translated["warnings"])

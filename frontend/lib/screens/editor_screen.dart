@@ -973,8 +973,9 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> pauseBookTranslation() async {
-    if (await sendBookControl('pause') && mounted && bookChapterNumber != null) {
-      setState(() => bookPause = Completer<void>());
+    setState(() => bookPause = Completer<void>());
+    if (!await sendBookControl('pause') && mounted) {
+      releaseBookPause();
     }
   }
 
@@ -1018,8 +1019,9 @@ class _EditorScreenState extends State<EditorScreen> {
     if (!mounted || confirmed != true || bookChapterNumber == null) {
       return;
     }
-    if (await sendBookControl('stop') && mounted && bookChapterNumber != null) {
-      setState(() => bookStopRequested = true);
+    setState(() => bookStopRequested = true);
+    await sendBookControl('stop');
+    if (mounted) {
       releaseBookPause();
     }
   }

@@ -107,6 +107,7 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void dispose() {
     progressTimer?.cancel();
+    bookPause?.complete();
     original.dispose();
     translated.dispose();
     sourceTerm.dispose();
@@ -923,6 +924,46 @@ class _EditorScreenState extends State<EditorScreen> {
   int? bookChapterNumber;
   int bookChapterTotal = 0;
   String? bookChapterTitle;
+  Completer<void>? bookPause;
+  bool bookStopRequested = false;
+  bool bookWaiting = false;
+
+  void resumeBookTranslation() {
+    final pause = bookPause;
+    if (pause == null) {
+      return;
+    }
+    setState(() => bookPause = null);
+    pause.complete();
+  }
+
+  Future<void> confirmStopBookTranslation() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('¿Detener la traducción del libro?'),
+        content: const Text(
+          'El capítulo en curso terminará. Las traducciones guardadas se '
+          'conservarán y los capítulos pendientes quedarán sin procesar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Seguir traduciendo'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Detener traducción'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true || bookChapterNumber == null) {
+      return;
+    }
+    setState(() => bookStopRequested = true);
+    resumeBookTranslation();
+  }
 
   Future<void> translateChapter() async {
     final mid = manuscriptId;
@@ -950,7 +991,17 @@ class _EditorScreenState extends State<EditorScreen> {
           if (!mounted) {
             return;
           }
+          if (bookPause != null && !bookStopRequested) {
+            setState(() => bookWaiting = true);
+            while (mounted && bookPause != null && !bookStopRequested) {
+              await bookPause!.future;
+            }
+          }
+          if (!mounted || bookStopRequested) {
+            break;
+          }
           setState(() {
+            bookWaiting = false;
             bookChapterNumber = i + 1;
             bookChapterTotal = titles.length;
             bookChapterTitle = titles[i];
@@ -971,7 +1022,12 @@ class _EditorScreenState extends State<EditorScreen> {
           setState(() {
             bookChapterNumber = null;
             bookChapterTitle = null;
-            final summary = 'Libro: $saved de ${titles.length} capítulos guardados.';
+            final stopped = bookStopRequested;
+            bookStopRequested = false;
+            bookWaiting = false;
+            bookPause = null;
+            final summary = '${stopped ? 'Traducción detenida' : 'Libro'}: '
+                '$saved de ${titles.length} capítulos guardados.';
             final pending = failures.join('\n');
             status = pending.isEmpty ? summary : '$summary\nPendientes:\n$pending';
           });
@@ -1284,8 +1340,39 @@ class _EditorScreenState extends State<EditorScreen> {
               style: TextStyle(fontSize: 12),
             ),
           ),
-          if (bookChapterNumber != null)
+          if (bookChapterNumber != null) ...[
             Text('Libro: $bookChapterNumber de $bookChapterTotal · $bookChapterTitle'),
+            Wrap(
+              spacing: 8,
+              children: [
+                IconButton(
+                  tooltip: 'Pausar después del capítulo actual',
+                  onPressed: bookPause != null || bookStopRequested
+                      ? null
+                      : () => setState(() => bookPause = Completer<void>()),
+                  icon: const Icon(Icons.pause),
+                ),
+                IconButton(
+                  tooltip: 'Reanudar traducción',
+                  onPressed: bookPause == null || bookStopRequested
+                      ? null
+                      : resumeBookTranslation,
+                  icon: const Icon(Icons.play_arrow),
+                ),
+                IconButton(
+                  tooltip: 'Detener traducción',
+                  onPressed: bookStopRequested ? null : confirmStopBookTranslation,
+                  icon: const Icon(Icons.stop),
+                ),
+              ],
+            ),
+            if (bookStopRequested)
+              const Text('Deteniendo al terminar el capítulo actual…')
+            else if (bookWaiting)
+              const Text('Traducción en pausa.')
+            else if (bookPause != null)
+              const Text('Pausa solicitada. Terminará primero el capítulo actual.'),
+          ],
           if (translating || translationPercent == 100) ...[
             const SizedBox(height: 14),
             LinearProgressIndicator(

@@ -8,6 +8,7 @@ from fastapi import File, UploadFile
 from fastapi.responses import Response
 from lxml import etree
 
+import os
 import sqlite3
 from threading import Condition, Thread
 from typing import Literal
@@ -19,6 +20,7 @@ from ...services.translation.chapter_pipeline import chapter_slices, translate_c
 from ...services.translation.literary_memory import build_context
 from ...services.translation.step4_store import (
     initialize_step4, list_glossary, add_term, add_version, list_versions, get_version,
+    checkpoint_key, clear_segment_checkpoints,
 )
 from ...services.providers.ollama_provider import OllamaError
 
@@ -195,6 +197,9 @@ def translate_one_chapter(project_id: str, manuscript_id: str, payload: ChapterR
     initialize_step4()
     glossary_entries = list_glossary(project_id)
     terms = {entry["source"]: entry["target"] for entry in glossary_entries}
+    model_name = payload.model or os.getenv("LIA_OLLAMA_MODEL", "llama3.1:8b")
+    checkpoint = checkpoint_key(project_id, manuscript_id, payload.chapter_index,
+                                selected["text"], model_name, terms)
     key = (project_id, manuscript_id, payload.job_id) if payload.job_id else None
     if key is not None:
         with _progress_lock:
@@ -213,9 +218,10 @@ def translate_one_chapter(project_id: str, manuscript_id: str, payload: ChapterR
                     raise TranslationStopped()
 
     try:
-        translated = translate_chapter(selected["text"], terms, payload.model, update_progress)
+        translated = translate_chapter(selected["text"], terms, model_name, update_progress,
+                                       checkpoint=checkpoint)
     except TranslationStopped as exc:
-        raise HTTPException(status_code=409, detail="Traduccion detenida. El capitulo en curso no se guardo.") from exc
+        raise HTTPException(status_code=409, detail="Traduccion detenida. Los segmentos validados quedaron guardados; vuelve a traducir con el mismo modelo y glosario para continuar.") from exc
     except OllamaError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
@@ -228,7 +234,9 @@ def translate_one_chapter(project_id: str, manuscript_id: str, payload: ChapterR
     result = add_version(project_id, manuscript_id, payload.chapter_index,
                          selected["title"], selected["text"],
                          translated["translation"], translated["warnings"])
+    clear_segment_checkpoints(checkpoint)
     return {"id": result["id"], "status": "draft", "segments": translated["segments"],
+            "resumed_segments": translated.get("resumed_segments", 0),
             "warnings": translated["warnings"], "chapter_index": payload.chapter_index}
 
 

@@ -1,5 +1,7 @@
 param(
     [string]$InputReport = '',
+    [ValidateSet('review','retranslate')]
+    [string]$Mode = 'retranslate',
     [string]$OllamaUrl = 'http://127.0.0.1:11434'
 )
 $ErrorActionPreference = 'Stop'
@@ -23,7 +25,7 @@ def diagnostic_warnings(source, target, checker):
     warnings=list(checker(source,target))
     if re.search(r"\bpantalones\b",source,re.I) and re.search(r"\bbags?\b",target,re.I):
         warnings.append({"code":"clothing_polysemy","message":"Check pockets versus bags and singular versus plural referents using context."})
-    if re.search(r"\bluz\b.*tintineante",source,re.I) and re.search(r"\btinkling\b",target,re.I):
+    if re.search(r"\bluz\b.*tintineante",source,re.I) and re.search(r"\b(?:tinkling|chime-like)\b",target,re.I):
         warnings.append({"code":"visual_polysemy","message":"Check visual flickering versus an audible tinkling sound."})
     return warnings
 
@@ -65,8 +67,25 @@ def evaluate(source,draft,revised,damage,checker):
     return reasons,before,after
 
 
+def request_proposal(generate, item, warnings, model, url, mode):
+    if mode == "retranslate":
+        # Blind to the flawed draft and issue labels: source and context only.
+        return generate(item["source"], model, url, timeout=360,
+                        structured_translation=True,
+                        previous=item.get("previous","")[-650:],
+                        following=item.get("following","")[:650])
+    return generate(json.dumps({
+        "source":item["source"],"draft":item["translation"],
+        "review_task":reviewer_task(warnings),
+        "previous_context":item.get("previous","")[-650:],
+        "following_context":item.get("following","")[:650]},
+        ensure_ascii=False), model, url, timeout=360,
+        structured_translation=True,editorial_review=True)
+
+
 def main():
     p=argparse.ArgumentParser()
+    p.add_argument('--mode',choices=['review','retranslate'],default='retranslate')
     p.add_argument('--repo',required=True);p.add_argument('--input',required=True)
     p.add_argument('--output',required=True);p.add_argument('--model',default='qwen3:4b')
     p.add_argument('--url',default='http://127.0.0.1:11434')
@@ -81,13 +100,14 @@ def main():
     if not isinstance(entries,list):raise SystemExit('El informe no contiene la lista de pruebas comparativas')
     output=Path(a.output);output.parent.mkdir(parents=True,exist_ok=True)
     records=[]
-    print('Prueba SELECTIVA V2 con avisos explicitos: reutiliza borradores Hy-MT2; Qwen revisa solo los que tengan avisos.',flush=True)
+    print('Prueba SELECTIVA V3. Modo:',a.mode,flush=True)
+    print('retranslate: Qwen recibe solo original y contexto; no ve el borrador ni los avisos.',flush=True)
     print('Sin glosario en esta prueba. Sin escritura en SQLite. Sin cambios en la app.',flush=True)
     for item in entries:
         if item.get('mode')!='aislado' or item.get('structure_valid') is not True:continue
         source=item['source'];draft=item['translation']
         warnings=diagnostic_warnings(source,draft,check_consistency)
-        record={'case':item['case'],'source':source,'draft':draft,'warnings_before':warnings,'reviewer':a.model}
+        record={'case':item['case'],'source':source,'draft':draft,'warnings_before':warnings,'reviewer':a.model,'comparison_mode':a.mode}
         print('\n===',item['case'],'===',flush=True)
         print('ORIGINAL:',source,'\nBORRADOR:',draft,flush=True)
         if not warnings:
@@ -97,11 +117,7 @@ def main():
             print('AVISOS:',json.dumps(warnings,ensure_ascii=False),flush=True)
             before=time.monotonic()
             try:
-                revised=generate(json.dumps({'source':source,'draft':draft,
-                    'review_task':reviewer_task(warnings),
-                    'previous_context':item.get('previous','')[-650:],
-                    'following_context':item.get('following','')[:650]},ensure_ascii=False),
-                    a.model,a.url,timeout=360,structured_translation=True,editorial_review=True)
+                revised=request_proposal(generate,item,warnings,a.model,a.url,a.mode)
                 record['proposal']=revised
                 reasons,_,after=evaluate(source,draft,revised,review_damage_reasons,check_consistency)
                 record.update(warnings_after=after,rejection_reasons=reasons,
@@ -126,7 +142,7 @@ if __name__=='__main__':main()
 try {
     [IO.File]::WriteAllText($TempScript, $Prueba, (New-Object Text.UTF8Encoding($false)))
     $env:PYTHONUTF8 = '1'
-    & $Python -u $TempScript --repo $Repo --input $InputReport --output $OutputReport --url $OllamaUrl
+    & $Python -u $TempScript --repo $Repo --input $InputReport --output $OutputReport --url $OllamaUrl --mode $Mode
     if ($LASTEXITCODE -ne 0) { throw 'La prueba no termino correctamente.' }
 } finally {
     Remove-Item -LiteralPath $TempScript -ErrorAction SilentlyContinue

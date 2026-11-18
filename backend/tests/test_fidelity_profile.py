@@ -105,6 +105,20 @@ class FidelityWarningTests(unittest.TestCase):
         self.assertEqual(self.codes("Nadaron por debajo del agua.", "They swam underwater."), set())
         self.assertEqual(self.codes("Las bombas explotaron.", "The bombs exploded."), set())
 
+    def test_political_idiom_spelling_variants(self):
+        source = "Dirigir los paises por debajo del agua."
+        for target in ("Govern the countries underwater.",
+                       "Govern the countries under water.",
+                       "Govern the countries under  water.",
+                       "Govern the countries beneath water.",
+                       "Govern the countries beneath the water."):
+            with self.subTest(target=target):
+                self.assertIn("literal_idiom", self.codes(source, target))
+        self.assertNotIn("literal_idiom", self.codes(
+            "Nadaron por debajo del agua.", "They swam under water."))
+        self.assertNotIn("literal_idiom", self.codes(
+            source, "Govern the countries behind the scenes."))
+
     def test_paragraph_mapping_preserves_blanks(self):
         result = paragraph_fidelity_warnings("Titulo\n\nmiles de millones", "Title\n\nMillions")
         self.assertEqual(result[0]["source_paragraph"], 2)

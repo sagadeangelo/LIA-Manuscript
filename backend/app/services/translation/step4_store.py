@@ -37,6 +37,8 @@ def checkpoint_key(project_id, manuscript_id, chapter_index, source, model, glos
     # Bump revision when segmentation, prompts or validation rules change.
     identity = ["paragraph-review-v3-context", project_id, manuscript_id, chapter_index,
                 source, model, glossary]
+    if any(name in model.casefold() for name in ("hy-mt2", "hymt2")):
+        identity.append("hymt-native-single-passage-v2")
     encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

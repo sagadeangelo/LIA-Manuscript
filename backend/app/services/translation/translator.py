@@ -21,7 +21,7 @@ def _repetition_signatures(text):
     return {phrase: count for phrase, count in phrases.items() if count > 1}
 
 
-def review_damage_reasons(draft, revised):
+def review_damage_reasons(draft, revised, source=""):
     """Conservative surface checks, not a semantic fidelity score."""
     reasons = []
     before = re.findall(r"[^\W_]+", draft)
@@ -42,8 +42,14 @@ def review_damage_reasons(draft, revised):
     if re.search(dangling, revised, re.I) and not re.search(dangling, draft, re.I):
         reasons.append("la revision termino con una construccion incompleta")
     broken = r"\b[A-Za-z]:\s+[A-Za-z]{3,}"
-    if re.search(broken, revised) and not re.search(broken, draft):
-        reasons.append("la revision introdujo un fragmento de palabra con dos puntos")
+    for match in re.finditer(broken, revised):
+        letter = match[0][0]
+        # An explicitly named letter (e.g. a symbol on a ring) is legitimate.
+        named_in_source = re.search(rf"(?<!\w){re.escape(letter)}(?!\w)", source)
+        if (match[0] not in draft and not named_in_source
+                and match[0].split(":")[1].strip().casefold().startswith(letter.casefold())):
+            reasons.append("la revision introdujo un fragmento de palabra con dos puntos")
+            break
     return reasons
 
 
@@ -87,7 +93,7 @@ def _missing_terms(text, glossary):
     ]
 
 
-def translate_segment(text: str, protected_terms: list[str] | dict[str, str] | None = None, model: str | None = None) -> dict:
+def translate_segment(text: str, protected_terms: list[str] | dict[str, str] | None = None, model: str | None = None, *, previous="", following="") -> dict:
     if not text.strip():
         raise ValueError('El segmento está vacío')
     if len(text) > MAX_SEGMENT:
@@ -120,7 +126,7 @@ def translate_segment(text: str, protected_terms: list[str] | dict[str, str] | N
             structured_translation=True,
             protected_terms=terms,
             retry_translation=retry,
-            glossary=glossary,
+            glossary=glossary, previous=previous, following=following,
         )
         translated = _apply_glossary(translated, glossary)
         words = re.findall(r"[^\W\d_]+", translated.casefold())
@@ -147,6 +153,9 @@ def translate_segment(text: str, protected_terms: list[str] | dict[str, str] | N
         if has_genocide and not re.search(r"\bgenocid(?:e|al)\b", translated, re.IGNORECASE):
             issues.append("falta la referencia al genocidio")
 
+        if (re.search(r"\bmiles de millones\b", text, re.I)
+                and not re.search(r"\bbillion(?:s)?\b", translated, re.I)):
+            issues.append("posible cambio de escala: miles de millones requiere billion/billions")
         if not issues:
             break
     else:
@@ -160,8 +169,10 @@ def translate_segment(text: str, protected_terms: list[str] | dict[str, str] | N
 
 
 def translate_and_review(text, protected_terms=None, model=None, *, previous="", following=""):
-    draft = translate_segment(text, protected_terms=protected_terms, model=model)
-    if draft["provider"] == "passthrough":
+    draft = translate_segment(text, protected_terms=protected_terms, model=model,
+                              previous=previous, following=following)
+    if (draft["provider"] == "passthrough"
+            or any(name in draft["model"].casefold() for name in ("hy-mt2", "hymt2"))):
         return draft
     glossary, terms = _segment_glossary(text, protected_terms)
     original = draft["translation"]
@@ -179,7 +190,7 @@ def translate_and_review(text, protected_terms=None, model=None, *, previous="",
             timeout=90, structured_translation=True, protected_terms=terms,
             editorial_review=True, glossary=glossary,
         )
-        damage = review_damage_reasons(original, revised)
+        damage = review_damage_reasons(original, revised, text)
         if damage:
             raise ValueError("; ".join(damage))
         revised = _apply_glossary(revised, glossary)
@@ -208,3 +219,4 @@ def translate_and_review(text, protected_terms=None, model=None, *, previous="",
              "message": f"Revision automatica pendiente ({reason}). Se conservo el borrador."},
         ]}
     return {**draft, "translation": revised, "warnings": warnings}
+

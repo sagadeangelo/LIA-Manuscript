@@ -19,6 +19,36 @@ import argparse,json,re,sys,time
 from pathlib import Path
 
 
+def diagnostic_warnings(source, target, checker):
+    warnings=list(checker(source,target))
+    if re.search(r"\bpantalones\b",source,re.I) and re.search(r"\bbags?\b",target,re.I):
+        warnings.append({"code":"clothing_polysemy","message":"Check pockets versus bags and singular versus plural referents using context."})
+    if re.search(r"\bluz\b.*tintineante",source,re.I) and re.search(r"\btinkling\b",target,re.I):
+        warnings.append({"code":"visual_polysemy","message":"Check visual flickering versus an audible tinkling sound."})
+    return warnings
+
+def reviewer_task(warnings):
+    guidance={
+        "selection_quantity":"Identify how many people must be selected versus how many are on the list. Preserve the agent who supplies the list.",
+        "rhetorical_negation":"Determine whether the Spanish is a negative rhetorical question or an expression of uncertainty. Preserve its communicative meaning.",
+        "control_roles":"Identify who controls whom. Do not turn people being controlled into people controlling themselves.",
+        "negation_scope":"Identify every coordinated action within the scope of negation. Do not turn a prevented action into an action performed.",
+        "literal_idiom":"Resolve the expression using the political context; determine whether water is literal or figurative.",
+        "ambiguous_equipment":"Resolve the equipment using the surrounding fluid-distribution context; distinguish a pump from an explosive bomb.",
+    }
+    return {
+        "instruction":"Use the Spanish source as authority. The English draft may be wrong. Investigate each review candidate using context, correct only demonstrated errors, and return only the full translation of source in the translation field. Do not add explanations or facts. Candidates are hypotheses, not mandatory replacements.",
+        "candidates":[{"code":w["code"],"check":guidance.get(w["code"],w.get("message","Check against source."))} for w in warnings],
+    }
+
+def proposal_status(reasons, after):
+    if reasons:
+        return "rejected_keep_draft"
+    if after:
+        return "unresolved_keep_draft"
+    return "candidate_manual_comparison"
+
+
 def evaluate(source,draft,revised,damage,checker):
     reasons=list(damage(draft,revised,source))
     if not revised.strip() or len([x for x in revised.splitlines() if x.strip()]) != 1:
@@ -28,7 +58,7 @@ def evaluate(source,draft,revised,damage,checker):
     en=set('the of and in to was were with from for that this it they had their but as on'.split())
     if words==re.findall(r'[^\W\d_]+',source.casefold()) or sum(w in es for w in words)>=max(4,2*sum(w in en for w in words)+2):
         reasons.append('Copia del original o probable salida en espanol')
-    before=checker(source,draft);after=checker(source,revised)
+    before=diagnostic_warnings(source,draft,checker);after=diagnostic_warnings(source,revised,checker)
     old_codes={w['code'] for w in before}
     if any(w['code'] not in old_codes for w in after):
         reasons.append('Nuevo aviso de consistencia')
@@ -51,12 +81,12 @@ def main():
     if not isinstance(entries,list):raise SystemExit('El informe no contiene la lista de pruebas comparativas')
     output=Path(a.output);output.parent.mkdir(parents=True,exist_ok=True)
     records=[]
-    print('Prueba SELECTIVA: reutiliza borradores Hy-MT2; Qwen revisa solo los que tengan avisos.',flush=True)
+    print('Prueba SELECTIVA V2 con avisos explicitos: reutiliza borradores Hy-MT2; Qwen revisa solo los que tengan avisos.',flush=True)
     print('Sin glosario en esta prueba. Sin escritura en SQLite. Sin cambios en la app.',flush=True)
     for item in entries:
         if item.get('mode')!='aislado' or item.get('structure_valid') is not True:continue
         source=item['source'];draft=item['translation']
-        warnings=check_consistency(source,draft)
+        warnings=diagnostic_warnings(source,draft,check_consistency)
         record={'case':item['case'],'source':source,'draft':draft,'warnings_before':warnings,'reviewer':a.model}
         print('\n===',item['case'],'===',flush=True)
         print('ORIGINAL:',source,'\nBORRADOR:',draft,flush=True)
@@ -68,13 +98,14 @@ def main():
             before=time.monotonic()
             try:
                 revised=generate(json.dumps({'source':source,'draft':draft,
+                    'review_task':reviewer_task(warnings),
                     'previous_context':item.get('previous','')[-650:],
                     'following_context':item.get('following','')[:650]},ensure_ascii=False),
                     a.model,a.url,timeout=360,structured_translation=True,editorial_review=True)
                 record['proposal']=revised
                 reasons,_,after=evaluate(source,draft,revised,review_damage_reasons,check_consistency)
                 record.update(warnings_after=after,rejection_reasons=reasons,
-                              status='rejected_keep_draft' if reasons else 'candidate_manual_comparison')
+                              status=proposal_status(reasons,after))
                 print('PROPUESTA QWEN:',revised,flush=True)
                 print('AVISOS DESPUES:',json.dumps(after,ensure_ascii=False),flush=True)
                 print('RESULTADO:',record['status'], '; '.join(reasons),flush=True)

@@ -1001,7 +1001,7 @@ class _EditorScreenState extends State<EditorScreen> {
         title: const Text('¿Detener la traducción del libro?'),
         content: const Text(
           'La traducción se detendrá al terminar el segmento en curso. '
-          'Se perderá el avance del capítulo actual. Las traducciones '
+          'Los segmentos validados se conservarán para continuar después. Las traducciones '
           'guardadas se conservarán.',
         ),
         actions: [

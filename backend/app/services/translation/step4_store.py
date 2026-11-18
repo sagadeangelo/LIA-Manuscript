@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 from ...core.database import connect
+from .consistency_checker import paragraph_fidelity_warnings
 
 
 def now():
@@ -128,5 +129,12 @@ def get_version(project_id, manuscript_id, version_id):
         return None
     item = dict(row)
     item["warnings"] = json.loads(item.pop("warnings_json"))
+    # Re-evaluate on read so existing and manually revised versions get current checks.
+    # Do not rewrite the stored translation or its historical metadata.
+    current = paragraph_fidelity_warnings(item["source_text"], item["translated_text"])
+    item["warnings"] = [
+        warning for warning in item["warnings"]
+        if warning.get("type") != "fidelity_review"
+    ] + current
     return item
 

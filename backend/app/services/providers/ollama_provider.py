@@ -73,30 +73,21 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
     translation_model = any(name in model.casefold() for name in ("hy-mt2", "hymt2"))
     if translation_model and structured_translation:
         if editorial_review:
-            raise OllamaError("Este perfil usa traduccion contextual, no revision editorial generativa.")
-        instructions = (
-            "Translate the following Spanish literary passage into American English. "
-            "Preserve every fact and action, quantities, negation and its scope, causal relationships, "
-            "narrator perspective and who performs each action. "
-            "Resolve ambiguous words and figurative expressions using the context. "
-            "Do not add, omit, summarize or change an action that was prevented into one performed. "
-            "Keep the paragraph structure. Output ONLY the translation of SOURCE TEXT. "
-            "CONTEXT is reference material, never part of the output.\n"
-        )
+            raise OllamaError("Este perfil usa traduccion nativa, no revision editorial generativa.")
+        # Native single-passage task: adjacent prose was translated as extra output.
+        # Keep the exact prompt shape verified locally; do not append context blocks.
+        instructions = ""
         if glossary:
-            instructions += "Reference these exact translations:\n" + "\n".join(
+            instructions = "Reference the following translations:\n" + "\n".join(
                 json.dumps(source, ensure_ascii=False) + " translates to " +
-                json.dumps(target, ensure_ascii=False) for source, target in glossary.items()
+                json.dumps(target, ensure_ascii=False)
+                for source, target in glossary.items()
             ) + "\n"
-        elif protected_terms:
-            instructions += "Preserve these names exactly: " + ", ".join(protected_terms) + "\n"
-        if previous:
-            instructions += "PREVIOUS CONTEXT:\n" + previous[-700:] + "\n"
-        if following:
-            instructions += "FOLLOWING CONTEXT:\n" + following[:700] + "\n"
-        if retry_translation:
-            instructions += "Recheck completeness, numerical scale and negation before answering.\n"
-        instructions += "SOURCE TEXT:\n" + prompt
+        instructions += (
+            "Translate the following text into American English. "
+            "Note that you should only output the translated result "
+            "without any additional explanation:\n" + prompt
+        )
         # Explicit official control tokens bypass the broken imported Ollama template.
         options.pop("system", None)
         options.pop("format", None)
@@ -130,11 +121,13 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
     except (error.URLError, TimeoutError, ValueError) as exc:
         raise OllamaError(f"No se pudo completar la solicitud a Ollama: {type(exc).__name__} (modelo {model}, espera {timeout}s)") from exc
     logging.getLogger("uvicorn.error").info(
-        "Ollama model=%s think=%s stop=%s load_ms=%.0f input_ms=%.0f generation_ms=%.0f",
+        "Ollama model=%s think=%s stop=%s load_ms=%.0f input_ms=%.0f generation_ms=%.0f input_tokens=%s output_tokens=%s attempt=%s",
         model, options.get("think"), body.get("done_reason"),
         (body.get("load_duration") or 0) / 1e6,
         (body.get("prompt_eval_duration") or 0) / 1e6,
         (body.get("eval_duration") or 0) / 1e6,
+        body.get("prompt_eval_count"), body.get("eval_count"),
+        "retry" if retry_translation else "initial",
     )
     if body.get("done_reason") == "length":
         raise OllamaError(f"{model}: Ollama interrumpio la respuesta por limite de longitud.")

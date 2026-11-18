@@ -1,7 +1,7 @@
 import re
 from collections.abc import Callable
 from ..analysis.chapter_detector import detect_chapters
-from .translator import translate_and_review
+from .translator import translate_and_review, is_layout_only
 from .step4_store import load_segment_checkpoints, save_segment_checkpoint
 from ..providers.ollama_provider import OllamaError
 
@@ -73,7 +73,7 @@ def _translate_lines(sections, terms, model, on_progress, checkpoint=None):
 
         for line in section.splitlines(keepends=True):
             label = line.strip()
-            if not label:
+            if not label or is_layout_only(line):
                 pieces.append((line, None))
                 continue
 
@@ -91,7 +91,10 @@ def _translate_lines(sections, terms, model, on_progress, checkpoint=None):
 
     total = sum(needs_translation is True for _, needs_translation in pieces)
     if total == 0:
-        raise ValueError("El capitulo no contiene parrafos traducibles.")
+        if on_progress:
+            on_progress(0, 0)
+        return {"translation": "".join(source for source, _ in pieces),
+                "segments": 0, "warnings": [], "resumed_segments": 0}
     prose = [source.strip() for source, needs_translation in pieces if needs_translation]
     cached = load_segment_checkpoints(checkpoint) if checkpoint else {}
     results = {

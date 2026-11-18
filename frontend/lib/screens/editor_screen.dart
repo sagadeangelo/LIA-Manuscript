@@ -788,7 +788,11 @@ class _EditorScreenState extends State<EditorScreen> {
 
       for (final warning in warnings) {
         final segment = int.tryParse('${warning['segment']}');
-        if (canMap &&
+        final paragraph = int.tryParse('${warning['source_paragraph']}');
+        if (sourceLines.length == rows.length && paragraph != null &&
+            paragraph >= 1 && paragraph <= sourceLines.length) {
+          (byRow[paragraph - 1] ??= []).add(warning);
+        } else if (canMap &&
             segment != null &&
             segment >= 1 &&
             segment <= proseRows.length) {
@@ -798,7 +802,7 @@ class _EditorScreenState extends State<EditorScreen> {
         }
       }
 
-      if (onlyWarnings && (warnings.isEmpty || unassigned.isNotEmpty)) {
+      if (onlyWarnings && (warnings.isEmpty || (byRow.isEmpty && unassigned.isNotEmpty))) {
         await showDialog<void>(
           context: context,
           builder: (dialogContext) => AlertDialog(
@@ -856,7 +860,19 @@ class _EditorScreenState extends State<EditorScreen> {
       final accepted = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Revisi\u00F3n biling\u00FCe'),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Revisi\u00F3n biling\u00FCe'),
+              if (unassigned.isNotEmpty)
+                Text(
+                  '${unassigned.length} avisos sin asignaci\u00F3n exacta:\n'
+                  '${unassigned.map(warningText).join('\n')}',
+                  style: const TextStyle(fontSize: 12),
+                ),
+            ],
+          ),
           content: SizedBox(
             width: 1000,
             height: 560,

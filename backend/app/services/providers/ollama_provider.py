@@ -5,7 +5,7 @@ from urllib import request, error
 class OllamaError(RuntimeError):
     pass
 
-def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, structured_translation: bool = False, protected_terms: list[str] | None = None, retry_translation: bool = False, editorial_review: bool = False, glossary: dict[str, str] | None = None) -> str:
+def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, structured_translation: bool = False, protected_terms: list[str] | None = None, retry_translation: bool = False, editorial_review: bool = False, glossary: dict[str, str] | None = None, previous: str = "", following: str = "") -> str:
     # La URL se configura localmente; nunca se envía el manuscrito a un proveedor externo por defecto.
     url = base_url.rstrip('/') + '/api/generate'
     options = {"model": model, "prompt": prompt, "stream": False}
@@ -26,6 +26,9 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
         options["system"] = (
             "Translate Spanish literary prose into natural American English. "
             "Preserve the narrator, all actions, names, time references, and paragraph breaks. "
+            "Preserve negation and its scope, who performs each action, causality, quantities "
+            "and modality. Interpret idioms using the narrative context rather than literally. "
+            "Do not embellish, summarize, invent actions or reverse an avoided action into one performed. "
             "Put only the complete translation in the translation field."
             + (" Preserve these exact terms: " + ", ".join(protected_terms) if protected_terms else "")
         )
@@ -42,6 +45,16 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
                 "Keep proper names as written. Return the translation without commentary."
             )
         options["options"] = {"temperature": 0.2 if retry_translation else 0}
+    if structured_translation and not editorial_review and (previous or following):
+        options["system"] += (
+            " The input is a JSON record. Translate ONLY its source field. "
+            "Use previous_context and following_context only to resolve meaning and antecedents. "
+            "Do not include the context in the translation."
+        )
+        options["prompt"] = json.dumps({
+            "source": prompt, "previous_context": previous[-700:],
+            "following_context": following[:700],
+        }, ensure_ascii=False)
     if editorial_review:
         options["system"] += (
             " The input is a JSON record containing the Spanish source, its English draft, "
@@ -56,6 +69,48 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
             " Use these exact source-to-English glossary equivalents: "
             + json.dumps(glossary, ensure_ascii=False)
         )
+
+    translation_model = any(name in model.casefold() for name in ("hy-mt2", "hymt2"))
+    if translation_model and structured_translation:
+        if editorial_review:
+            raise OllamaError("Este perfil usa traduccion contextual, no revision editorial generativa.")
+        instructions = (
+            "Translate the following Spanish literary passage into American English. "
+            "Preserve every fact and action, quantities, negation and its scope, causal relationships, "
+            "narrator perspective and who performs each action. "
+            "Resolve ambiguous words and figurative expressions using the context. "
+            "Do not add, omit, summarize or change an action that was prevented into one performed. "
+            "Keep the paragraph structure. Output ONLY the translation of SOURCE TEXT. "
+            "CONTEXT is reference material, never part of the output.\n"
+        )
+        if glossary:
+            instructions += "Reference these exact translations:\n" + "\n".join(
+                json.dumps(source, ensure_ascii=False) + " translates to " +
+                json.dumps(target, ensure_ascii=False) for source, target in glossary.items()
+            ) + "\n"
+        elif protected_terms:
+            instructions += "Preserve these names exactly: " + ", ".join(protected_terms) + "\n"
+        if previous:
+            instructions += "PREVIOUS CONTEXT:\n" + previous[-700:] + "\n"
+        if following:
+            instructions += "FOLLOWING CONTEXT:\n" + following[:700] + "\n"
+        if retry_translation:
+            instructions += "Recheck completeness, numerical scale and negation before answering.\n"
+        instructions += "SOURCE TEXT:\n" + prompt
+        # Explicit official control tokens bypass the broken imported Ollama template.
+        options.pop("system", None)
+        options.pop("format", None)
+        options["raw"] = True
+        options["prompt"] = (
+            "<\uff5chy_begin\u2581of\u2581sentence\uff5c>"
+            "<\uff5chy_User\uff5c>" + instructions + "<\uff5chy_Assistant\uff5c>"
+        )
+        options["options"] = {
+            "num_ctx": 4096, "num_predict": 2048,
+            "temperature": 0.2 if retry_translation else 0.3,
+            "top_p": 0.6, "top_k": 20, "repeat_penalty": 1.05,
+            "stop": ["<\uff5chy_EOT\uff5c>", "<\uff5chy_end\u2581of\u2581sentence\uff5c>"],
+        }
     payload = json.dumps(options).encode("utf-8")
     req = request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method='POST')
     try:
@@ -84,7 +139,7 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
     if body.get("done_reason") == "length":
         raise OllamaError(f"{model}: Ollama interrumpio la respuesta por limite de longitud.")
     result = body.get('response')
-    if structured_translation:
+    if structured_translation and not translation_model:
         try:
             document = json.loads(result)
         except (TypeError, ValueError) as exc:
@@ -95,3 +150,4 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
     if not isinstance(result, str) or not result.strip():
         raise OllamaError('Ollama no devolvió una traducción válida')
     return result.strip()
+

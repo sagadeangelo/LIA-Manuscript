@@ -38,7 +38,7 @@ class _EditorScreenState extends State<EditorScreen> {
   Duration translationElapsed = Duration.zero;
 
   Future<void> refreshModels() async {
-    if (loadingModels || translating) {
+    if (loadingModels || translationSessionActive) {
       return;
     }
     setState(() {
@@ -96,6 +96,40 @@ class _EditorScreenState extends State<EditorScreen> {
   int chapterIndex = 0;
   bool busy = false;
   bool translating = false;
+  bool translationSessionActive = false;
+  String translationStatus = '';
+  String? activeTranslationManuscript;
+  String? activeTranslationTitle;
+  String? activeTranslationModel;
+
+  Future<void> runTranslationSession(Future<void> Function() action) async {
+    if (translationSessionActive) {
+      return;
+    }
+    setState(() {
+      translationSessionActive = true;
+      bookStopRequested = false;
+      translationStatus = 'Preparando traducción…';
+    });
+    try {
+      await action();
+    } catch (error) {
+      if (mounted) {
+        setState(() => translationStatus = 'Traducción: $error');
+      }
+    } finally {
+      if (mounted) {
+        releaseBookPause();
+        setState(() {
+          translationSessionActive = false;
+          bookStopRequested = false;
+          activeTranslationManuscript = null;
+          activeTranslationTitle = null;
+          activeTranslationModel = null;
+        });
+      }
+    }
+  }
   String status = 'Selecciona o importa un manuscrito';
   @override
   void initState() {
@@ -190,7 +224,9 @@ class _EditorScreenState extends State<EditorScreen> {
       translated.clear();
       loadedVersionId = null;
       coverageNotice = null;
-      translationPercent = 0;
+      if (!translationSessionActive) {
+        translationPercent = 0;
+      }
       versions = relevant;
       status = 'Capítulo cargado';
     });
@@ -591,9 +627,11 @@ class _EditorScreenState extends State<EditorScreen> {
           return;
         }
         setState(() {
-          versions = history
-              .where((v) => v is Map && v['chapter_index'] == index)
-              .toList();
+          if (manuscriptId == mid) {
+            versions = history
+                .where((v) => v is Map && v['chapter_index'] == chapterIndex)
+                .toList();
+          }
           status = 'Versi\u00F3n revisada guardada';
         });
     });
@@ -921,7 +959,7 @@ class _EditorScreenState extends State<EditorScreen> {
         value.split(RegExp(r'[\r\n]')).where((line) => line.trim().isNotEmpty).length;
     final expected = source is String ? countLines(source) : 0;
     final actual = countLines(text);
-    if (mounted) {
+    if (mounted && manuscriptId == mid && chapterIndex == result['chapter_index']) {
       setState(() {
         translated.text = text;
         loadedVersionId = id;
@@ -944,7 +982,7 @@ class _EditorScreenState extends State<EditorScreen> {
   String? activeTranslationJob;
 
   Future<bool> sendBookControl(String action) async {
-    final mid = manuscriptId;
+    final mid = activeTranslationManuscript;
     final job = activeTranslationJob;
     if (mid == null || job == null) {
       return true;
@@ -998,7 +1036,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('¿Detener la traducción del libro?'),
+        title: const Text('¿Detener la traducción?'),
         content: const Text(
           'La traducción se detendrá al terminar el segmento en curso. '
           'Los segmentos validados se conservarán para continuar después. Las traducciones '
@@ -1016,7 +1054,7 @@ class _EditorScreenState extends State<EditorScreen> {
         ],
       ),
     );
-    if (!mounted || confirmed != true || bookChapterNumber == null) {
+    if (!mounted || confirmed != true || !translationSessionActive) {
       return;
     }
     setState(() => bookStopRequested = true);
@@ -1032,7 +1070,9 @@ class _EditorScreenState extends State<EditorScreen> {
     if (mid == null || model == null) {
       return;
     }
-    await task(() => translateOneChapter(mid, chapterIndex, model));
+    final index = chapterIndex;
+    final title = '${chapters[index]['title']}';
+    await runTranslationSession(() => translateOneChapter(mid, index, model, title));
   }
 
   Future<void> translateAllChapters() async {
@@ -1044,7 +1084,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final titles = [
       for (final chapter in chapters) '${chapter['title']}',
     ];
-    await task(() async {
+    await runTranslationSession(() async {
       final history = await api.versions(widget.projectId, mid);
       if (!mounted) {
         return;
@@ -1063,7 +1103,7 @@ class _EditorScreenState extends State<EditorScreen> {
       ];
       final skipped = titles.length - queue.length;
       if (queue.isEmpty) {
-        setState(() => status = 'Todos los capítulos ya tienen una traducción guardada.');
+        setState(() => translationStatus = 'Todos los capítulos ya tienen una traducción guardada.');
         return;
       }
       final failures = <String>[];
@@ -1090,11 +1130,7 @@ class _EditorScreenState extends State<EditorScreen> {
             bookChapterTitle = titles[i];
           });
           try {
-            await selectChapter(i);
-            if (!mounted) {
-              return;
-            }
-            await translateOneChapter(mid, i, model);
+            await translateOneChapter(mid, i, model, titles[i]);
             saved++;
           } catch (error) {
             failures.add('${titles[i]}: $error');
@@ -1113,14 +1149,14 @@ class _EditorScreenState extends State<EditorScreen> {
                 '$saved de ${queue.length} capítulos pendientes traducidos. '
                 '$skipped ya tenían una versión guardada.';
             final pending = failures.join('\n');
-            status = pending.isEmpty ? summary : '$summary\nPendientes:\n$pending';
+            translationStatus = pending.isEmpty ? summary : '$summary\nPendientes:\n$pending';
           });
         }
       }
     });
   }
 
-  Future<void> translateOneChapter(String mid, int index, String activeModel) async {
+  Future<void> translateOneChapter(String mid, int index, String activeModel, String title) async {
       final random = Random.secure();
       final digits = List.generate(
         32,
@@ -1132,12 +1168,15 @@ class _EditorScreenState extends State<EditorScreen> {
        final stopwatch = Stopwatch()..start();
       setState(() {
         activeTranslationJob = jobId;
+        activeTranslationManuscript = mid;
+        activeTranslationTitle = title;
+        activeTranslationModel = activeModel;
         completedSegments = 0;
         totalSegments = 0;
         translationElapsed = Duration.zero;
         translating = true;
         translationPercent = 0;
-        status = 'Traduciendo con Ollama local…';
+        translationStatus = 'Traduciendo $title con $activeModel…';
       });
       var polling = false;
       final timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
@@ -1180,18 +1219,19 @@ class _EditorScreenState extends State<EditorScreen> {
         );
         timer.cancel();
         if (!mounted) return;
-        await loadVersion(result['id'] as String);
-        if (!mounted) return;
         final history = await api.versions(widget.projectId, mid);
         if (!mounted) return;
         setState(() {
-          versions = history
-              .where((v) => v is Map && v['chapter_index'] == index)
-              .toList();
+          if (manuscriptId == mid && chapterIndex == index) {
+            versions = history
+                .where((v) => v is Map && v['chapter_index'] == index)
+                .toList();
+          }
           translationPercent = 100;
-          status =
+          translationStatus =
               'Borrador guardado. Segmentos: ${result['segments']}. '
-              'Advertencias: ${(result['warnings'] as List?)?.length ?? 0}';
+              'Advertencias: ${(result['warnings'] as List?)?.length ?? 0}. '
+              'Abre la versión desde el historial para revisarla.';
         });
       } finally {
         timer.cancel();
@@ -1492,7 +1532,7 @@ class _EditorScreenState extends State<EditorScreen> {
                             child: Text(name, overflow: TextOverflow.ellipsis),
                           ),
                       ],
-                      onChanged: busy || loadingModels || modelsError != null
+                      onChanged: busy || translationSessionActive || loadingModels || modelsError != null
                           ? null
                           : (value) => setState(() => selectedModel = value),
                     ),
@@ -1501,7 +1541,7 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
               IconButton(
                 tooltip: 'Actualizar modelos',
-                onPressed: busy || loadingModels ? null : refreshModels,
+                onPressed: busy || translationSessionActive || loadingModels ? null : refreshModels,
                 icon: const Icon(Icons.refresh),
               ),
             ],
@@ -1512,14 +1552,14 @@ class _EditorScreenState extends State<EditorScreen> {
             const Text('Ollama no tiene modelos instalados.'),
           const SizedBox(height: 18),
           FilledButton.icon(
-            onPressed: busy || manuscriptId == null || selectedModel == null ||
+            onPressed: busy || translationSessionActive || manuscriptId == null || selectedModel == null ||
                 loadingModels || modelsError != null ? null : translateChapter,
             icon: const Icon(Icons.auto_awesome),
             label: Text(translating ? 'TRADUCIENDO…' : 'TRADUCIR CAPÍTULO'),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: busy || manuscriptId == null || chapters.isEmpty ||
+            onPressed: busy || translationSessionActive || manuscriptId == null || chapters.isEmpty ||
                     selectedModel == null || loadingModels || modelsError != null
                 ? null : translateAllChapters,
             icon: const Icon(Icons.library_books_outlined),
@@ -1545,7 +1585,7 @@ class _EditorScreenState extends State<EditorScreen> {
                       fontWeight: FontWeight.w600,
                     )),
                     TextButton(
-                      onPressed: busy || selectedModel == null ||
+                      onPressed: busy || translationSessionActive || selectedModel == null ||
                               loadingModels || modelsError != null
                           ? null
                           : translateChapter,
@@ -1555,7 +1595,9 @@ class _EditorScreenState extends State<EditorScreen> {
                 ),
               ),
             ),
-          if (bookChapterNumber != null) ...[
+          if (translationSessionActive) ...[
+            Text('En segundo plano: ${activeTranslationTitle ?? 'Preparando…'}'),
+            if (bookChapterNumber != null)
             Text('Cola: $bookChapterNumber de $bookChapterTotal · $bookChapterTitle'),
             Wrap(
               spacing: 8,
@@ -1598,12 +1640,17 @@ class _EditorScreenState extends State<EditorScreen> {
             Text(
               translating
                   ? totalSegments == 0
-                      ? 'Preparando con $selectedModel · ${translationElapsed.inSeconds} s'
+                      ? 'Preparando con $activeTranslationModel · ${translationElapsed.inSeconds} s'
                       : '$completedSegments de $totalSegments segmentos · ${translationElapsed.inSeconds} s'
                   : '$translationPercent%',
               style: TextStyle(color: progressColor),
             ),
           ],
+          if (translationStatus.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(translationStatus, style: TextStyle(color: palette.muted, fontSize: 12)),
+            ),
           const SizedBox(height: 22),
           Text(
             'REVISIÓN',

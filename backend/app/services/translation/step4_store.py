@@ -35,7 +35,7 @@ def initialize_step4():
 
 def checkpoint_key(project_id, manuscript_id, chapter_index, source, model, glossary):
     # Bump revision when segmentation, prompts or validation rules change.
-    identity = ["paragraph-review-v2-guarded", project_id, manuscript_id, chapter_index,
+    identity = ["paragraph-review-v3-context", project_id, manuscript_id, chapter_index,
                 source, model, glossary]
     encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -127,3 +127,4 @@ def get_version(project_id, manuscript_id, version_id):
     item = dict(row)
     item["warnings"] = json.loads(item.pop("warnings_json"))
     return item
+

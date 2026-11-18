@@ -25,14 +25,16 @@ class FidelityProfileTests(unittest.TestCase):
         self.assertEqual(result, "The pump stopped.")
         return sent[0]
 
-    def test_hymt_raw_context_glossary(self):
+    def test_hymt_native_prompt_excludes_adjacent_prose(self):
         for model in ("lia-hymt2:1.8b-q8", "hf.co/tencent/Hy-MT2-1.8B-GGUF:Q8_0"):
             body = self.request(model)
             self.assertTrue(body["raw"])
             self.assertNotIn("format", body)
             self.assertNotIn("system", body)
-            self.assertIn("SOURCE TEXT:\nLa bomba paro.", body["prompt"])
-            self.assertIn("PREVIOUS CONTEXT:\nUna tuberia.", body["prompt"])
+            self.assertIn("without any additional explanation:\nLa bomba paro.", body["prompt"])
+            self.assertNotIn("Una tuberia.", body["prompt"])
+            self.assertNotIn("Otra tuberia.", body["prompt"])
+            self.assertNotIn("SOURCE TEXT:", body["prompt"])
             self.assertIn('"Nombre" translates to "Name"', body["prompt"])
             self.assertTrue(body["prompt"].endswith("<｜hy_Assistant｜>"))
 

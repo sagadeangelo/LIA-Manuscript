@@ -2,6 +2,7 @@ import re
 from collections.abc import Callable
 from ..analysis.chapter_detector import detect_chapters
 from .translator import translate_and_review
+from .step4_store import load_segment_checkpoints, save_segment_checkpoint
 from ..providers.ollama_provider import OllamaError
 
 MAX_SEGMENT = 2000
@@ -62,7 +63,7 @@ _DITOX_COVER = [
 
 
 
-def _translate_lines(sections, terms, model, on_progress):
+def _translate_lines(sections, terms, model, on_progress, checkpoint=None):
     pieces = []
     for index, section in enumerate(sections):
         lines = [line.strip() for line in section.splitlines() if line.strip()]
@@ -91,11 +92,16 @@ def _translate_lines(sections, terms, model, on_progress):
     total = sum(needs_translation is True for _, needs_translation in pieces)
     if total == 0:
         raise ValueError("El capitulo no contiene parrafos traducibles.")
-    if on_progress:
-        on_progress(0, total)
-
     prose = [source.strip() for source, needs_translation in pieces if needs_translation]
-    results = {}
+    cached = load_segment_checkpoints(checkpoint) if checkpoint else {}
+    results = {
+        index: (translation, warnings)
+        for index, (source, translation, warnings) in cached.items()
+        if 0 <= index < total and source == prose[index]
+    }
+    resumed = len(results)
+    if on_progress:
+        on_progress(resumed, total)
     failures = {}
 
     def translate_piece(index):
@@ -111,6 +117,9 @@ def _translate_lines(sections, terms, model, on_progress):
             raise ValueError("Ollama devolvio una traduccion vacia.")
         if len(translated.splitlines()) != 1:
             raise ValueError("La traduccion cambio la estructura del parrafo.")
+        # Commit before reporting progress or honoring pause/stop.
+        if checkpoint:
+            save_segment_checkpoint(checkpoint, index, prose[index], translated, result["warnings"])
         results[index] = (translated, result["warnings"])
         failures.pop(index, None)
         if on_progress:
@@ -118,6 +127,8 @@ def _translate_lines(sections, terms, model, on_progress):
 
     # Retry only missing pieces before assembling or saving the chapter.
     for index in range(total):
+        if index in results:
+            continue
         try:
             translate_piece(index)
         except (OllamaError, ValueError) as exc:
@@ -151,14 +162,15 @@ def _translate_lines(sections, terms, model, on_progress):
         outputs.append(leading + translated + trailing)
         warnings.extend({**warning, "segment": index + 1} for warning in notices)
         index += 1
-    return {"translation": "".join(outputs), "segments": total, "warnings": warnings}
+    return {"translation": "".join(outputs), "segments": total, "warnings": warnings, "resumed_segments": resumed}
 
 
 def translate_chapter(
     text: str, terms: list[str] | dict[str, str], model: str | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    *, checkpoint: str | None = None,
 ) -> dict:
     front_matter_sections = re.split(
         r"(?im)(?=^[ \t]*(?:dedicatoria|prefacio)[ \t]*\r?$)", text
     )
-    return _translate_lines(front_matter_sections, terms, model, on_progress)
+    return _translate_lines(front_matter_sections, terms, model, on_progress, checkpoint)

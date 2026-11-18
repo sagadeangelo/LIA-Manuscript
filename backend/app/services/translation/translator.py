@@ -7,6 +7,46 @@ from ..providers.ollama_provider import OllamaError, generate
 MAX_SEGMENT = 6000
 
 
+def is_layout_only(text):
+    """Punctuation, ornament lines and scene separators need no model."""
+    return bool(text.strip()) and not any(char.isalnum() for char in text)
+
+
+def _repetition_signatures(text):
+    words = re.findall(r"[^\W_]+", text.casefold())
+    phrases = {}
+    for index in range(len(words) - 4):
+        phrase = tuple(words[index:index + 5])
+        phrases[phrase] = phrases.get(phrase, 0) + 1
+    return {phrase: count for phrase, count in phrases.items() if count > 1}
+
+
+def review_damage_reasons(draft, revised):
+    """Conservative surface checks, not a semantic fidelity score."""
+    reasons = []
+    before = re.findall(r"[^\W_]+", draft)
+    after = re.findall(r"[^\W_]+", revised)
+    if len(before) >= 12 and len(after) < len(before) * 0.80:
+        reasons.append("posible omision: la revision elimino mas del 20% de las palabras")
+    old_repeats = _repetition_signatures(draft)
+    if any(count > old_repeats.get(phrase, 1)
+           for phrase, count in _repetition_signatures(revised).items()):
+        reasons.append("la revision introdujo una frase repetida")
+    # Preserve repetitions already present in a deliberate literary draft.
+    pattern = r"\b([^\W\d_]+)[\s,:;]+\1\b"
+    old_adjacent = {match[0].casefold() for match in re.finditer(pattern, draft, re.I)}
+    if any(match[0].casefold() not in old_adjacent
+           for match in re.finditer(pattern, revised, re.I)):
+        reasons.append("la revision introdujo palabras duplicadas")
+    dangling = r"\b(?:the|a|an|of|to|and|or|with|into|from)\s*[:;,]?\s*[\"'\u2019\u201d]*$"
+    if re.search(dangling, revised, re.I) and not re.search(dangling, draft, re.I):
+        reasons.append("la revision termino con una construccion incompleta")
+    broken = r"\b[A-Za-z]:\s+[A-Za-z]{3,}"
+    if re.search(broken, revised) and not re.search(broken, draft):
+        reasons.append("la revision introdujo un fragmento de palabra con dos puntos")
+    return reasons
+
+
 def _term_pattern(term):
     return rf"(?<!\w){re.escape(term)}(?!\w)"
 
@@ -52,6 +92,10 @@ def translate_segment(text: str, protected_terms: list[str] | dict[str, str] | N
         raise ValueError('El segmento está vacío')
     if len(text) > MAX_SEGMENT:
         raise ValueError(f'El segmento supera {MAX_SEGMENT} caracteres; divídelo antes de traducir')
+    if is_layout_only(text):
+        return {"translation": text, "provider": "passthrough",
+                "model": model or os.getenv("LIA_OLLAMA_MODEL", "llama3.1:8b"),
+                "warnings": []}
     glossary, terms = _segment_glossary(text, protected_terms)
     has_genocide = bool(re.search(r"\bgenocidio\b", text, re.IGNORECASE))
 
@@ -117,6 +161,8 @@ def translate_segment(text: str, protected_terms: list[str] | dict[str, str] | N
 
 def translate_and_review(text, protected_terms=None, model=None, *, previous="", following=""):
     draft = translate_segment(text, protected_terms=protected_terms, model=model)
+    if draft["provider"] == "passthrough":
+        return draft
     glossary, terms = _segment_glossary(text, protected_terms)
     original = draft["translation"]
 
@@ -133,6 +179,9 @@ def translate_and_review(text, protected_terms=None, model=None, *, previous="",
             timeout=90, structured_translation=True, protected_terms=terms,
             editorial_review=True, glossary=glossary,
         )
+        damage = review_damage_reasons(original, revised)
+        if damage:
+            raise ValueError("; ".join(damage))
         revised = _apply_glossary(revised, glossary)
         if _missing_terms(revised, glossary):
             raise ValueError("La revision omitio un termino del glosario.")
@@ -152,9 +201,10 @@ def translate_and_review(text, protected_terms=None, model=None, *, previous="",
         if any(warning not in draft["warnings"] for warning in warnings):
             raise ValueError("La revision introdujo un aviso de consistencia.")
     except (OllamaError, ValueError) as exc:
+        reason = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
         return {**draft, "warnings": [
             *draft["warnings"],
             {"type": "editorial_review_pending",
-             "message": f"Revision automatica pendiente ({type(exc).__name__}). Se conservo el borrador."},
+             "message": f"Revision automatica pendiente ({reason}). Se conservo el borrador."},
         ]}
     return {**draft, "translation": revised, "warnings": warnings}

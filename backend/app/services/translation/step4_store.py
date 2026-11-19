@@ -40,6 +40,8 @@ def checkpoint_key(project_id, manuscript_id, chapter_index, source, model, glos
                 source, model, glossary]
     if any(name in model.casefold() for name in ("hy-mt2", "hymt2")):
         identity.append("hymt-native-single-passage-v2")
+    if model.casefold() == "qwen2.5:3b":
+        identity.append("qwen25-plain-single-passage-v1")
     encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

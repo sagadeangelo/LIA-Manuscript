@@ -39,7 +39,7 @@ def fidelity_warnings(source: str, translated: str) -> list[dict]:
             and re.search(r"\b(?:we|us|our)\b.*\b(?:maintain|have|gain|take)\b.*\bcontrol\b", dst)):
         flag("control_roles", "Posible cambio de roles: estar bajo control frente a tener el control.")
     if ("por debajo del agua" in src
-            and re.search(r"\b(?:under\s*water|beneath\s+(?:the\s+)?water|under\s+the\s+water)\b", dst)
+            and re.search(r"\b(?:under\s*water|beneath\s+(?:the\s+)?water|under\s+the\s+water|below\s+(?:the\s+)?water)\b", dst)
             and re.search(r"\b(?:gobern\w*|dirig\w*|paises|países|politic\w*|polític\w*)\b", src)):
         flag("literal_idiom", "Posible traduccion literal de una expresion figurada en contexto politico.")
     if (re.search(r"\bbombas?\b", src) and re.search(r"\bbombs?\b", dst)

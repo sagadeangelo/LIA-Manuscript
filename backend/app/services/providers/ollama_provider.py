@@ -102,6 +102,27 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
             "top_p": 0.6, "top_k": 20, "repeat_penalty": 1.05,
             "stop": ["<\uff5chy_EOT\uff5c>", "<\uff5chy_end\u2581of\u2581sentence\uff5c>"],
         }
+    # Verified profile: this model often echoes Spanish with contextual JSON.
+    # Keep the model's native Ollama template; only change the translation task.
+    plain_qwen = (structured_translation and not editorial_review
+                  and model.casefold() == "qwen2.5:3b")
+    if plain_qwen:
+        instructions = (
+            "Translate the following Spanish text into natural American English. "
+            "Preserve all facts, actions, negations, quantities and names. "
+            "Output only the complete translation, without explanations.\n\n"
+        )
+        if glossary:
+            instructions = ("Use these exact source-to-English glossary equivalents: "
+                            + json.dumps(glossary, ensure_ascii=False) + "\n" + instructions)
+        elif protected_terms:
+            instructions = ("Preserve these exact terms: "
+                            + json.dumps(protected_terms, ensure_ascii=False) + "\n" + instructions)
+        options.pop("system", None)
+        options.pop("format", None)
+        options["prompt"] = instructions + prompt
+        options["options"] = {"temperature": 0.2 if retry_translation else 0,
+                              "num_ctx": 4096, "num_predict": 2048, "seed": 42}
     payload = json.dumps(options).encode("utf-8")
     req = request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method='POST')
     try:
@@ -132,7 +153,7 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
     if body.get("done_reason") == "length":
         raise OllamaError(f"{model}: Ollama interrumpio la respuesta por limite de longitud.")
     result = body.get('response')
-    if structured_translation and not translation_model:
+    if structured_translation and not translation_model and not plain_qwen:
         try:
             document = json.loads(result)
         except (TypeError, ValueError) as exc:

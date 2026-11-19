@@ -15,7 +15,7 @@ class FidelityProfileTests(unittest.TestCase):
                 return io.BytesIO(b'{"capabilities":["thinking"]}')
             sent.append(body)
             text = "The pump stopped."
-            result = text if body.get("raw") else json.dumps({"translation": text})
+            result = json.dumps({"translation": text}) if body.get("format") else text
             return io.BytesIO(json.dumps({"response": result, "done_reason": "stop"}).encode())
         with patch.object(provider.request, "urlopen", side_effect=respond):
             result = provider.generate(
@@ -39,12 +39,41 @@ class FidelityProfileTests(unittest.TestCase):
             self.assertTrue(body["prompt"].endswith("<｜hy_Assistant｜>"))
 
     def test_qwen_retains_json_and_think_control(self):
-        for model in ("qwen3:4b", "qwen2.5:3b"):
+        for model in ("qwen3:4b",):
             body = self.request(model)
             self.assertFalse(body["think"])
             self.assertNotIn("raw", body)
             self.assertEqual(body["format"]["required"], ["translation"])
             self.assertEqual(json.loads(body["prompt"])["previous_context"], "Una tuberia.")
+
+    def test_qwen25_initial_uses_verified_plain_profile(self):
+        body = self.request("qwen2.5:3b")
+        self.assertNotIn("format", body)
+        self.assertNotIn("system", body)
+        self.assertNotIn("raw", body)
+        self.assertNotIn("Una tuberia.", body["prompt"])
+        self.assertNotIn("Otra tuberia.", body["prompt"])
+        self.assertTrue(body["prompt"].endswith("La bomba paro."))
+        self.assertIn('"Nombre": "Name"', body["prompt"])
+        self.assertEqual(body["options"]["temperature"], 0)
+        self.assertEqual(body["options"]["seed"], 42)
+
+    def test_qwen25_review_keeps_json_contract(self):
+        bodies = []
+        def respond(req, **kwargs):
+            body = json.loads(req.data)
+            if req.full_url.endswith("/api/show"):
+                return io.BytesIO(b'{"capabilities":[]}')
+            bodies.append(body)
+            return io.BytesIO(b'{"response":"{\\"translation\\":\\"She left.\\"}","done_reason":"stop"}')
+        with patch.object(provider.request, "urlopen", side_effect=respond):
+            result = provider.generate(
+                '{"source":"Ella salio.","draft":"She left."}',
+                "qwen2.5:3b", "http://localhost:11434",
+                structured_translation=True, editorial_review=True)
+        self.assertEqual(result, "She left.")
+        self.assertIn("format", bodies[0])
+        self.assertIn("system", bodies[0])
 
     def test_hymt_does_not_rewrite_draft(self):
         with patch.object(tr, "generate", return_value="She stayed home.") as generate:
@@ -111,6 +140,7 @@ class FidelityWarningTests(unittest.TestCase):
                        "Govern the countries under water.",
                        "Govern the countries under  water.",
                        "Govern the countries beneath water.",
+                       "Govern the countries below the water.",
                        "Govern the countries beneath the water."):
             with self.subTest(target=target):
                 self.assertIn("literal_idiom", self.codes(source, target))

@@ -33,7 +33,12 @@ def fidelity_warnings(source: str, translated: str) -> list[dict]:
         r"impossible|unable|lack\w*|fail\w*)\b|\b\w+n't\b", dst)
     complex_scope = re.search(
         r"\b(?:evit\w*|impid\w*)\b|\bno\s+(?:\w+\s+){0,3}(?:\w+ara|\w+iera|\w+ase|\w+iese)\b", src)
-    if source_negation and (not target_negation or complex_scope):
+    # An explicit shared "from" governing coordinated gerunds removes this
+    # particular scope ambiguity. It does not certify the rest of the passage.
+    explicit_prevention = re.search(
+        r"\b(?:prevent\w*|kept)\s+(?:me|him|her|us|them)\s+from\s+\w+ing\b"
+        r"[^.;:!?]*\band\s+\w+ing\b", dst)
+    if source_negation and (not target_negation or (complex_scope and not explicit_prevention)):
         flag("negation_scope", "Cotejar la negacion y su alcance: que accion se evita o se niega.")
     if (re.search(r"\b(?:tenernos|mantenernos|ser|estar)\s+(?:mas |más )?controlad\w*", src)
             and re.search(r"\b(?:we|us|our)\b.*\b(?:maintain|have|gain|take)\b.*\bcontrol\b", dst)):
@@ -49,6 +54,16 @@ def fidelity_warnings(source: str, translated: str) -> list[dict]:
             and re.search(r"\blista de diez\b", src)
             and re.search(r"\b(?:choose|select|pick)\s+ten\b", dst)):
         flag("selection_quantity", "Posible cambio de cantidad: elegir de una lista no implica elegir a todos.")
+    if (re.search(r"\bpantalon\w*\b", src) and re.search(r"\bbols\w*\b", src)
+            and re.search(r"\bbags?\b", dst)):
+        flag("clothing_polysemy", "Cotejar bolsas en prendas: pockets, bags y los referentes del contexto.")
+    if (re.search(r"\bluz\b.*\btintineante\b", src)
+            and re.search(r"\b(?:tinkling|chime-like)\b", dst)):
+        flag("visual_polysemy", "Cotejar parpadeo visual frente a sonido: flickering/blinking y tinkling.")
+    source_words = re.findall(r"[^\W\d_]+", src)
+    target_words = re.findall(r"[^\W\d_]+", dst)
+    if len(source_words) >= 20 and len(target_words) < len(source_words) * 0.45:
+        flag("possible_content_omission", "Salida muy breve frente al original: cotejar acciones y detalles, sin asumir omision por longitud.")
     return warnings
 
 
@@ -65,3 +80,4 @@ def paragraph_fidelity_warnings(source: str, translated: str) -> list[dict]:
         for index, (original, target) in enumerate(zip(source_lines, target_lines), 1)
         for warning in fidelity_warnings(original, target)
     ]
+

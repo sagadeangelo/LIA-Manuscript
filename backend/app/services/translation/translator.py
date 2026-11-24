@@ -2,6 +2,7 @@ import json
 import os
 import re
 from .consistency_checker import check_consistency
+from .output_quality import output_issues
 from ..providers.ollama_provider import OllamaError, generate
 
 MAX_SEGMENT = 6000
@@ -50,7 +51,10 @@ def review_damage_reasons(draft, revised, source=""):
                 and match[0].split(":")[1].strip().casefold().startswith(letter.casefold())):
             reasons.append("la revision introdujo un fragmento de palabra con dos puntos")
             break
-    return reasons
+    old_issues = set(output_issues(source, draft))
+    introduced = [issue for issue in output_issues(source, revised) if issue not in old_issues]
+    reasons.extend(introduced)
+    return list(dict.fromkeys(reasons))
 
 
 def _term_pattern(term):
@@ -118,6 +122,7 @@ def translate_segment(text: str, protected_terms: list[str] | dict[str, str] | N
     spanish = set("el la los las de del que en una por para con sus esta este pero porque fue eran como donde".split())
     english = set("the of and in to was were with from for that this it they had their but as on".split())
 
+    spanish_hits = english_hits = 0
     for retry in (False, True):
         translated = generate(
             text.strip() if retry or expected_heading else text,
@@ -128,6 +133,10 @@ def translate_segment(text: str, protected_terms: list[str] | dict[str, str] | N
             retry_translation=retry,
             glossary=glossary, previous=previous, following=following,
         )
+        quality_issues = output_issues(text, translated)
+        if quality_issues:
+            issues = quality_issues
+            continue
         translated = _apply_glossary(translated, glossary)
         words = re.findall(r"[^\W\d_]+", translated.casefold())
         spanish_hits = sum(word in spanish for word in words)
@@ -174,6 +183,13 @@ def translate_and_review(text, protected_terms=None, model=None, *, previous="",
     if (draft["provider"] == "passthrough"
             or any(name in draft["model"].casefold() for name in ("hy-mt2", "hymt2"))):
         return draft
+    policy = os.getenv("LIA_EDITORIAL_REVIEW_POLICY", "selective").casefold()
+    if policy not in {"off", "selective", "always"}:
+        raise ValueError("LIA_EDITORIAL_REVIEW_POLICY debe ser off, selective o always.")
+    risks = {warning.get("code") for warning in draft["warnings"]
+             if warning.get("type") == "fidelity_review"}
+    if policy == "off" or (policy == "selective" and not risks):
+        return draft
     glossary, terms = _segment_glossary(text, protected_terms)
     original = draft["translation"]
 
@@ -211,6 +227,10 @@ def translate_and_review(text, protected_terms=None, model=None, *, previous="",
         warnings = check_consistency(text, revised, terms)
         if any(warning not in draft["warnings"] for warning in warnings):
             raise ValueError("La revision introdujo un aviso de consistencia.")
+        remaining_risks = {warning.get("code") for warning in warnings
+                           if warning.get("type") == "fidelity_review"}
+        if policy == "selective" and remaining_risks:
+            raise ValueError("La revision no resolvio todos los avisos de fidelidad.")
     except (OllamaError, ValueError) as exc:
         reason = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
         return {**draft, "warnings": [
@@ -219,4 +239,5 @@ def translate_and_review(text, protected_terms=None, model=None, *, previous="",
              "message": f"Revision automatica pendiente ({reason}). Se conservo el borrador."},
         ]}
     return {**draft, "translation": revised, "warnings": warnings}
+
 

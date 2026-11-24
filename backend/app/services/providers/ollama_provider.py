@@ -141,6 +141,10 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
         raise OllamaError(f"Ollama HTTP {exc.code}: {detail or exc.reason}") from exc
     except (error.URLError, TimeoutError, ValueError) as exc:
         raise OllamaError(f"No se pudo completar la solicitud a Ollama: {type(exc).__name__} (modelo {model}, espera {timeout}s)") from exc
+    if not isinstance(body, dict):
+        raise OllamaError("Ollama devolvio un cuerpo de respuesta invalido.")
+    if body.get("done") is False:
+        raise OllamaError("Ollama devolvio una respuesta sin finalizar.")
     logging.getLogger("uvicorn.error").info(
         "Ollama model=%s think=%s stop=%s load_ms=%.0f input_ms=%.0f generation_ms=%.0f input_tokens=%s output_tokens=%s attempt=%s",
         model, options.get("think"), body.get("done_reason"),
@@ -164,4 +168,5 @@ def generate(prompt: str, model: str, base_url: str, timeout: int = 360, *, stru
     if not isinstance(result, str) or not result.strip():
         raise OllamaError('Ollama no devolvió una traducción válida')
     return result.strip()
+
 

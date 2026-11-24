@@ -3,7 +3,8 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 from ...core.database import connect
-from .consistency_checker import paragraph_fidelity_warnings
+from .consistency_checker import paragraph_fidelity_warnings, fidelity_warnings
+from .output_quality import output_issues, paragraph_output_warnings
 
 
 def now():
@@ -58,11 +59,15 @@ def load_segment_checkpoints(key):
         except (ValueError, TypeError):
             continue
         translated = row["translated_text"]
-        if (not translated.strip() or len(translated.strip().splitlines()) != 1
+        if (output_issues(row["source_text"], translated)
+                or not translated.strip() or len(translated.strip().splitlines()) != 1
                 or not isinstance(warnings, list)
                 or any(not isinstance(warning, dict) for warning in warnings)):
             continue
-        results[row["segment_index"]] = (row["source_text"], translated, warnings)
+        current_warnings = [warning for warning in warnings
+                            if warning.get("type") not in {"fidelity_review", "output_quality_review"}]
+        current_warnings += fidelity_warnings(row["source_text"], translated)
+        results[row["segment_index"]] = (row["source_text"], translated, current_warnings)
     return results
 
 
@@ -133,10 +138,12 @@ def get_version(project_id, manuscript_id, version_id):
     item["warnings"] = json.loads(item.pop("warnings_json"))
     # Re-evaluate on read so existing and manually revised versions get current checks.
     # Do not rewrite the stored translation or its historical metadata.
-    current = paragraph_fidelity_warnings(item["source_text"], item["translated_text"])
+    current = (paragraph_fidelity_warnings(item["source_text"], item["translated_text"])
+               + paragraph_output_warnings(item["source_text"], item["translated_text"]))
     item["warnings"] = [
         warning for warning in item["warnings"]
-        if warning.get("type") != "fidelity_review"
+        if warning.get("type") not in {"fidelity_review", "output_quality_review"}
     ] + current
     return item
+
 

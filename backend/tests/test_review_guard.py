@@ -1,4 +1,5 @@
 """Run from backend: python -m unittest discover -s tests -p test_review_guard.py"""
+import os
 import unittest
 from unittest.mock import patch
 from app.services.translation import translator as tr
@@ -7,7 +8,7 @@ from app.services.translation import chapter_pipeline as pipeline
 
 class ReviewGuardTests(unittest.TestCase):
     def review(self, draft, revised, model="qwen3:4b"):
-        with patch.object(tr, "translate_segment", return_value={
+        with patch.dict(os.environ, {"LIA_EDITORIAL_REVIEW_POLICY": "always"}), patch.object(tr, "translate_segment", return_value={
             "translation": draft, "model": model, "provider": "ollama", "warnings": [],
         }), patch.object(tr, "generate", return_value=revised), \
              patch.object(tr, "check_consistency", return_value=[]):
@@ -92,4 +93,5 @@ class ReviewGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 

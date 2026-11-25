@@ -1,3 +1,4 @@
+from contextvars import copy_context
 from io import BytesIO
 from zipfile import BadZipFile, ZipFile
 
@@ -107,7 +108,7 @@ def start_translation_job(project_id: str, manuscript_id: str, payload: ChapterR
             _jobs[key] = outcome
 
     try:
-        Thread(target=run, daemon=True).start()
+        Thread(target=copy_context().run, args=(run,), daemon=True).start()
     except Exception:
         with _progress_lock:
             _jobs.pop(key, None)

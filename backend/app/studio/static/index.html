@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Writer Studio · LIA-Tech</title>
+    <link rel="stylesheet" href="/studio/assets/studio.css" />
+    <script type="module" src="/studio/assets/studio.js"></script>
+  </head>
+  <body>
+    <header>
+      <b>LIA-Tech</b><span>Writer Studio</span
+      ><button id="logout" hidden>Salir</button>
+    </header>
+    <main>
+      <h1>Herramientas para escritores</h1>
+      <section id="access">
+        <h2>Tu espacio privado</h2>
+        <form id="credentials">
+          <label
+            >Correo electrónico<input
+              required
+              type="email"
+              name="email"
+              autocomplete="username"
+          /></label>
+          <label
+            >Contraseña<input
+              required
+              type="password"
+              minlength="12"
+              name="password"
+              autocomplete="current-password"
+          /></label>
+          <label
+            >Invitación para crear una cuenta<input
+              name="invitation"
+              type="password"
+              autocomplete="off"
+          /></label>
+          <button value="login">Iniciar sesión</button
+          ><button value="register">Crear cuenta</button>
+        </form>
+        <button id="forgot">Recuperar contraseña</button>
+      </section>
+      <section id="redeem" hidden>
+        <h2>Actualizar cuenta</h2>
+        <form id="redeemForm">
+          <label id="newPassword"
+            >Nueva contraseña<input
+              name="password"
+              type="password"
+              minlength="12"
+              autocomplete="new-password" /></label
+          ><button>Confirmar enlace</button>
+        </form>
+      </section>
+      <div id="workspace" hidden>
+        <nav aria-label="Herramientas">
+          <a href="#staylo">LIA Staylo</a
+          ><a href="#manuscript">LIA Manuscript</a
+          ><a href="#publish">LIA Publish</a>
+        </nav>
+        <section>
+          <h2 id="proyectos">Proyectos literarios</h2>
+          <form id="newProject">
+            <label
+              >Nombre del proyecto<input
+                required
+                maxlength="200"
+                name="name" /></label
+            ><button>Crear proyecto</button>
+          </form>
+          <label>Proyecto<select id="project"></select></label>
+          <form id="upload">
+            <label
+              >Importar TXT o DOCX<input
+                name="file"
+                required
+                type="file"
+                accept=".txt,.docx" /></label
+            ><button>Importar manuscrito</button>
+          </form>
+          <label>Manuscrito<select id="book"></select></label>
+        </section>
+        <section>
+          <label>Capítulo<select id="chapter"></select></label>
+        </section>
+        <section id="staylo">
+          <h2>LIA Staylo</h2>
+          <button id="review">Analizar capítulo</button
+          ><button id="applyAll" disabled>Aplicar primeras sugerencias</button>
+          <div id="findings"></div>
+          <label
+            >Texto corregido<textarea id="corrected" rows="7"></textarea></label
+          ><button id="saveCorrected">Guardar nueva versión</button>
+        </section>
+        <section id="manuscript">
+          <h2>LIA Manuscript</h2>
+          <div class="pages">
+            <article>
+              <h3>Original</h3>
+              <pre id="original"></pre>
+            </article>
+            <article>
+              <h3>Traducción al inglés</h3>
+              <textarea
+                id="translation"
+                rows="8"
+                aria-label="Texto traducido"
+              ></textarea>
+            </article>
+          </div>
+          <button id="translate">Traducir capítulo</button
+          ><progress id="progress" hidden></progress>
+          <div id="jobControls" hidden>
+            <button data-action="pause">Pausar</button
+            ><button data-action="resume">Reanudar</button
+            ><button data-action="stop">Cancelar</button>
+          </div>
+          <label>Versiones guardadas<select id="version"></select></label>
+          <p id="quality"></p>
+          <button id="saveTranslation">Guardar revisión del capítulo</button
+          ><button id="prepareTranslation">
+            Preparar capítulo traducido en Publish
+          </button>
+        </section>
+        <section id="publish">
+          <h2>LIA Publish</h2>
+          <p>
+            Exporta la versión seleccionada con sus capítulos e índice editorial
+            EPUB.
+          </p>
+          <form id="layoutForm">
+            <label
+              >Título de la edición<input
+                name="title"
+                maxlength="300"
+                required /></label
+            ><label>Autor<input name="author" maxlength="150" /></label
+            ><label
+              >Formato de impresión<select name="trim">
+                <option value="6x9">6 × 9 pulgadas</option>
+                <option value="5x8">5 × 8 pulgadas</option>
+                <option value="a5">A5</option>
+              </select></label
+            ><label
+              >Margen (mm)<input
+                type="number"
+                name="margin"
+                min="12"
+                max="35"
+                value="20" /></label
+            ><label
+              >Tipografía<select name="font">
+                <option value="serif">DejaVu Serif</option>
+                <option value="sans">DejaVu Sans</option>
+              </select></label
+            ><label
+              >Página legal<textarea
+                name="legal"
+                maxlength="4000"
+              ></textarea></label
+            ><label
+              >Dedicatoria<textarea
+                name="dedication"
+                maxlength="4000"
+              ></textarea></label
+            ><button>Guardar edición PDF</button>
+          </form>
+          <label>Ediciones PDF<select id="layout"></select></label
+          ><a id="pdf" target="_blank" rel="noopener">Ver interior PDF</a>
+          <a id="epub">Descargar EPUB</a> <a id="docx">Descargar DOCX</a>
+        </section>
+        <section>
+          <h2 id="suscripcion">Suscripción de prueba</h2>
+          <p id="plan"></p>
+          <label
+            >Plan simulado<select id="planChoice">
+              <option value="studio">Las tres herramientas</option>
+              <option value="staylo">Staylo</option>
+              <option value="manuscript">Manuscript</option>
+              <option value="publish">Publish</option>
+            </select></label
+          ><button id="subscribe">Activar prueba de 30 días</button
+          ><button id="checkout" hidden>Abrir Stripe de prueba</button>
+        </section>
+      </div>
+      <p role="status" id="status" aria-live="polite"></p>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Administración · Writer Studio</title>
+    <link rel="stylesheet" href="/studio/assets/studio.css" />
+    <script type="module" src="/studio/assets/admin.js"></script>
+  </head>
+  <body>
+    <header><b>LIA-Tech</b><span>Administración de staging</span></header>
+    <main>
+      <h1>Actividad del Studio</h1>
+      <section>
+        <form>
+          <label
+            >Token de administración<input
+              type="password"
+              required
+              autocomplete="off" /></label
+          ><label
+            >Herramienta para ajustar<select name="tool">
+              <option value="staylo">Staylo</option>
+              <option value="manuscript">Manuscript</option>
+              <option value="publish">Publish</option>
+            </select></label
+          ><label
+            >Nuevo límite diario por cuenta<input
+              type="number"
+              name="allowance"
+              min="0"
+              max="100000" /></label
+          ><button value="read">Consultar actividad</button
+          ><button value="update">Guardar límite</button>
+        </form>
+        <p role="status"></p>
+        <dl></dl>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from io import BytesIO
 from uuid import uuid4
+from zipfile import ZipFile
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from docx import Document
 from ...core.config import settings
@@ -34,6 +35,10 @@ async def upload_manuscript(project_id: str, file: UploadFile = File(...)):
         if extension == "txt":
             text = raw.decode("utf-8-sig")
         else:
+            with ZipFile(BytesIO(raw)) as archive:
+                entries = archive.infolist()
+                if len(entries) > 4096 or sum(entry.file_size for entry in entries) > 100 * 1024 * 1024:
+                    raise ValueError("El DOCX excede el límite de contenido descomprimido")
             document = Document(BytesIO(raw))
             text = "\n".join(p.text for p in document.paragraphs)
     except (UnicodeError, ValueError, Exception) as exc:

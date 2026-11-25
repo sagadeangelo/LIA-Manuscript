@@ -24,7 +24,12 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install backend dependencies
-        run: python -m pip install -r backend/requirements.txt
+        run: python -m pip install -r backend/requirements-studio.txt
+      - name: Install portable book exporter
+        run: sudo apt-get update && sudo apt-get install -y pandoc fonts-dejavu-core
+      - name: Run staging account, editorial and simulated billing regression
+        working-directory: backend
+        run: python -m pytest -q tests/test_studio.py
       - name: Check Python compilation
         run: python -m compileall -q backend/app backend/tests
       - name: Run literary tests (simulated model, real HTTP and SQLite)

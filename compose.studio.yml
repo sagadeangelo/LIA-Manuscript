@@ -1,0 +1,23 @@
+services:
+  studio:
+    build:
+      context: ./backend
+      dockerfile: Studio.Dockerfile
+    ports: ["127.0.0.1:8129:8129"]
+    environment:
+      STUDIO_INVITE: ${STUDIO_INVITE:?define una invitación privada}
+      STUDIO_ORIGIN: ${STUDIO_ORIGIN:-http://127.0.0.1:8129}
+      STUDIO_ADMIN_TOKEN: ${STUDIO_ADMIN_TOKEN:-}
+      STUDIO_SMTP_HOST: ${STUDIO_SMTP_HOST:-}
+      STUDIO_SMTP_PORT: ${STUDIO_SMTP_PORT:-587}
+      STUDIO_SMTP_USER: ${STUDIO_SMTP_USER:-}
+      STUDIO_SMTP_PASSWORD: ${STUDIO_SMTP_PASSWORD:-}
+      STUDIO_MAIL_FROM: ${STUDIO_MAIL_FROM:-}
+      STUDIO_STRIPE_TEST_KEY: ${STUDIO_STRIPE_TEST_KEY:-}
+      STUDIO_STRIPE_TEST_WEBHOOK: ${STUDIO_STRIPE_TEST_WEBHOOK:-}
+      STUDIO_LT_URL: ${STUDIO_LT_URL:?define la URL interna de LanguageTool}
+      LIA_OLLAMA_URL: ${LIA_OLLAMA_URL:?define la URL interna de Ollama}
+      LIA_OLLAMA_MODEL: ${LIA_OLLAMA_MODEL:-qwen2.5:3b}
+    volumes: ["studio_data:/srv/state"]
+volumes:
+  studio_data:

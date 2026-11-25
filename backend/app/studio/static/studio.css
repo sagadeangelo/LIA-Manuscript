@@ -1,0 +1,173 @@
+:root {
+  color-scheme: dark;
+  font:
+    16px/1.5 "Segoe UI",
+    system-ui,
+    sans-serif;
+  background: #10111d;
+  color: #edeaf7;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  border-bottom: 1px solid #474258;
+  padding: 1rem max(5vw, 1rem);
+  background: #171727;
+}
+header b {
+  color: #87e7ec;
+  font-size: 1.35rem;
+}
+header button {
+  margin-left: auto;
+}
+main {
+  max-width: 72rem;
+  margin: 3rem auto;
+  padding: 0 1rem;
+}
+h1 {
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  letter-spacing: -0.05em;
+}
+h2 {
+  color: #c8b4ff;
+}
+section {
+  padding: clamp(1rem, 3vw, 2rem);
+  background: #1b1b2b;
+  border: 1px solid #474258;
+  border-radius: 1rem;
+  margin-bottom: 1rem;
+}
+label {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.75rem 0;
+}
+input,
+select,
+button {
+  font: inherit;
+  padding: 0.6rem 0.85rem;
+  border-radius: 0.45rem;
+  border: 1px solid #635b78;
+  max-width: 100%;
+}
+input,
+select {
+  background: #11121d;
+  width: 100%;
+}
+button {
+  background: #d7c9ff;
+  color: #211538;
+  cursor: pointer;
+  margin: 0.25rem 0.3rem 0.25rem 0;
+}
+button:disabled {
+  opacity: 0.55;
+}
+#access {
+  max-width: 34rem;
+}
+.pages {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.pages article {
+  padding: 1rem;
+  background: #141422;
+  min-width: 0;
+}
+.pages pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 22rem;
+  overflow: auto;
+  font:
+    1.05rem/1.65 Georgia,
+    serif;
+}
+#status {
+  color: #c8e9ee;
+}
+progress {
+  accent-color: #b997ff;
+}
+@media (max-width: 650px) {
+  .pages {
+    grid-template-columns: 1fr;
+  }
+  main {
+    margin: 1.5rem auto;
+  }
+}
+#staylo {
+  border-color: #33666f;
+}
+#staylo h2 {
+  color: #7ddde3;
+}
+#publish {
+  border-color: #897642;
+}
+#publish h2,
+#publish a {
+  color: #f2cf79;
+}
+#publish a {
+  margin-right: 1.2rem;
+}
+textarea {
+  width: 100%;
+  resize: vertical;
+  background: #12141f;
+  color: inherit;
+  font:
+    1.05rem/1.55 Georgia,
+    serif;
+  padding: 1rem;
+  border-radius: 0.5rem;
+}
+#findings article {
+  border-left: 3px solid #7ddde3;
+  margin: 0.8rem 0;
+  padding: 0.3rem 1rem;
+}
+#findings article:nth-child(even) {
+  border-color: #b9a3ee;
+}
+
+nav {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 1rem 0 2rem;
+}
+nav a {
+  color: #c8b4ff;
+}
+nav a:first-child {
+  color: #7ddde3;
+}
+nav a:last-child {
+  color: #f2cf79;
+}
+#findings article[data-group="grammar"] {
+  border-color: #ff9da8;
+}
+#findings article[data-group="spelling"] {
+  border-color: #79dbe2;
+}
+#findings article[data-group="other"] {
+  border-color: #cab3ff;
+}

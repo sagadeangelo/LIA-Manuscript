@@ -30,6 +30,13 @@ def output_issues(source, target):
             and sum(bool(line.strip()) for line in target.splitlines()) != 1):
         issues.append("paragraph_structure_changed")
 
+    # A narrative clause wrapped in misplaced quotation marks was observed
+    # on short Spanish dialogue with an attribution introduced by a second dash.
+    if (source.lstrip().startswith("—") and source.count("—") >= 2
+            and not target.lstrip().startswith(('"', '“', '—'))
+            and re.search(r'[,!?]\s+["“][^"”]+[.!?]\s+["”]\s*$', target)):
+        issues.append("misplaced_dialogue_quotes")
+
     # Colon artefacts recorded in model responses, not general punctuation cleanup.
     # A matching literal expression in the source may be intentional.
     malformed = r"\b(?:to|the|a|an|our|your|my|his|her|its|their)\s*:\s+[A-Za-z]+"
